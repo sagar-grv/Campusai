@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #0a0a0a;
+  --paper: #f4f4f0;
+  --signal: #ff4d00;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Satoshi", "IBM Plex Sans", system-ui, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--signal);
+  color: #fff;
+}
+
+.font-display {
+  font-family: "Cabinet Grotesk", "Outfit", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: "JetBrains Mono", "Source Code Pro", monospace;
+}
+
+/* Skeleton grid */
+.skel-grid > * + * { border-left: 1px solid #d4d4d4; }
+@media (max-width: 768px) {
+  .skel-grid > * + * { border-left: none; border-top: 1px solid #d4d4d4; }
+}
+
+/* Editorial overline */
+.overline {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #525252;
+}
+
+/* Pill button */
+.btn-signal {
+  background: var(--ink);
+  color: #fff;
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform 200ms ease-out, background-color 200ms ease-out;
+  border: 1px solid var(--ink);
+}
+.btn-signal:hover { background: var(--signal); border-color: var(--signal); transform: translateY(-2px); }
+.btn-signal:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-outline {
+  background: transparent;
+  color: var(--ink);
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-weight: 600;
+  border: 1px solid var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 200ms ease-out, color 200ms ease-out;
+}
+.btn-outline:hover { background: var(--ink); color: #fff; }
+
+/* Sharp card */
+.sharp-card { background: #fff; border: 1px solid #d4d4d4; }
+
+/* Fade-up */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 480ms ease-out both; }
+
+/* Marquee ticker */
+@keyframes tickerScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.ticker-track { animation: tickerScroll 60s linear infinite; }
+
+/* Chat bubbles */
+.bubble-user { background: #0a0a0a; color: #fff; }
+.bubble-ai { background: #ffffff; border: 1px solid #d4d4d4; }
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

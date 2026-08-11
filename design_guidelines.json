@@ -1,0 +1,134 @@
+{
+  "project_type": "hybrid_fullstack",
+  "theme": {
+    "mode": "light",
+    "archetype": "Swiss & High-Contrast (Archetype 4) mixed with Editorial Future",
+    "description": "A stark, professional, and authoritative career dashboard for college students. Uses a high-contrast editorial layout with an energetic accent color. Banned: Inter font, Space Grotesk for dashboard, purple/blue gradients, soft blurry shadows, AI emojis. Avoid the generic 'SaaS card' look."
+  },
+  "typography": {
+    "headings": {
+      "family": "Cabinet Grotesk",
+      "fallbacks": ["Outfit", "Clash Display", "sans-serif"],
+      "styling": "Tight letter spacing (tracking-tighter), never centered by default. font-black or font-light depending on hierarchy."
+    },
+    "body": {
+      "family": "Satoshi",
+      "fallbacks": ["IBM Plex Sans", "Manrope", "sans-serif"],
+      "styling": "Clean, readable, leading-relaxed."
+    },
+    "mono": {
+      "family": "JetBrains Mono",
+      "fallbacks": ["Source Code Pro", "monospace"],
+      "styling": "Used for data labels, skill matching, JD parsing sections."
+    },
+    "rules": [
+      "Strictly DO NOT use Inter, Roboto, Open Sans, Lato for headings.",
+      "Jump between heading and subheading must not exceed 2 Tailwind steps.",
+      "Labels/Overlines must be uppercase, tiny (text-xs), with wide spacing (tracking-widest)."
+    ]
+  },
+  "colors": {
+    "background": {
+      "app": "#F4F4F0",
+      "surface": "#FFFFFF",
+      "surface_alt": "#EAEAEC",
+      "nav": "rgba(255, 255, 255, 0.85)"
+    },
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#525252",
+      "tertiary": "#8A8A8A"
+    },
+    "brand": {
+      "primary": "#FF4D00",
+      "primary_hover": "#CC3D00",
+      "success": "#009E5A",
+      "warning": "#F5A623",
+      "error": "#D0021B",
+      "forbidden": ["#7351B7", "#1B93A4", "Purple gradients"]
+    },
+    "borders": {
+      "default": "#D4D4D4",
+      "focus": "#FF4D00"
+    },
+    "rules": [
+      "No full-screen gradients. Texture over gloss.",
+      "Use pure high-contrast flat colors.",
+      "Text on primary brand color must be pure white (#FFFFFF).",
+      "Header/Nav MUST NOT be transparent. Use glassmorphism (backdrop-blur-xl bg-white/85) or solid white."
+    ]
+  },
+  "layouts": {
+    "philosophy": "Expose the skeleton. Data tables and gap analysis use 'Grid Borders' (technical look).",
+    "dashboard_grid": "Bento Grid structure with sharp 1px borders. Use pure rectangular cards (rounded-none or max rounded-sm). Grid items must use border-r border-b to expose the skeleton.",
+    "spacing": "Generous internal padding (p-6, p-8) to prevent text collision with borders. Tight gaps (gap-4) for dashboard widgets.",
+    "mobile_first": true,
+    "rules": [
+      "Grid items must be direct children of the grid container.",
+      "Never fill 100% of the grid perfectly if not a dashboard; leave negative space. For dashboards, utilize every pixel.",
+      "Mobile images/sections must not exceed 80vh."
+    ]
+  },
+  "visual_enhancers": {
+    "borders": "1px crisp lines. Border collapse styling for feature grids.",
+    "shadows": "Hard offset shadows (2px 2px 0px #0A0A0A) for interactives, no soft ambient blur.",
+    "surfaces": "Solid colors or 'Crystal Glass' strictly for floating navigational elements."
+  },
+  "components": {
+    "buttons": "Pill-shaped (rounded-full) or completely sharp (rounded-none). Must have distinct hover state (translate-y-[-2px] with increased shadow or color shift).",
+    "cards": "Cardless or flat with 1px border. No soft shadows. Use hard offset shadows for interactive elements, or stick to pure minimal borders.",
+    "inputs": "Flat, 1px border, white background. Focus ring: 2px solid #FF4D00. Use Shadcn customized for sharp edges.",
+    "chatbot": "Editorial flow. RAG citations should appear as small mono-spaced tags. System responses: Light grey bg. User messages: Black bg with white text.",
+    "gap_analysis": "Use data tables with strict grids. Missing skills highlighted in warning/brand color. Matched skills in subdued success green.",
+    "company_explorer": "List or dense grid view. High density, scannable data."
+  },
+  "motion": {
+    "hover": "Hover states must explicitly set colors (e.g. hover:bg-black hover:text-white).",
+    "transitions": "Use specific properties, NEVER 'transition: all'. Example: transition-transform duration-200 ease-out.",
+    "page_load": "Staggered fade-up for grid items. Minimalist animations for dashboards.",
+    "accessibility": "Respect prefers-reduced-motion."
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1637589308599-3478cc55510d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwyfHxpbmRpYW4lMjBjb2xsZWdlJTIwc3R1ZGVudCUyMGxhcHRvcHxlbnwwfHx8fDE3ODY0MzkzMzl8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Indian college student with laptop - Use for Landing/Welcome page hero",
+        "category": "hero"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1758691737278-3af15b37af48?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwzfHxqb2IlMjBpbnRlcnZpZXclMjBtb2Rlcm4lMjBvZmZpY2V8ZW58MHx8fHwxNzg2NDM5MzM5fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Two colleagues discussing work in modern office - Use for Interview Prep section or Gap Analysis empty state",
+        "category": "feature"
+      }
+    ],
+    "icons": "lucide-react (already installed). Use thin stroke-width (1.5) to match editorial feel."
+  },
+  "accessibility": {
+    "contrast": "Minimum 4.5:1 for normal text, 3:1 for large text. Use APCA preferred.",
+    "testing": "All interactive and key informational elements MUST include data-testid attribute (e.g., data-testid='upload-resume-button').",
+    "focus": "Focus states must have HIGHER contrast than default state."
+  },
+  "3d_libraries": {
+    "usage": "Not recommended for this specific problem statement as the focus is on data density, gap analysis, and fast productivity. If complex visualization is needed, strictly prefer pure Recharts or D3.js (2D)."
+  },
+  "instructions_to_main_agent": [
+    "You have .js files not .tsx files. Write React components using plain .jsx/.js syntax.",
+    "Build a clean, professional, high-contrast UI (black, white, off-white, and bright terracotta accent).",
+    "Avoid standard Vercel/Stripe looking cards. Expose grid borders (use border-collapse strategies or simple 1px grid lines).",
+    "The Gap Analysis should look like a serious data report or terminal, not a playful toy.",
+    "For the chatbot, RAG capabilities mean citing sources clearly below the answers using small, distinct tags.",
+    "Use Recharts with sharp, flat styling if charts are needed. No gradients in charts.",
+    "In the Chatbot interface, ensure 'I don't know' logic acts gracefully.",
+    "Prioritize using pre-existing components from src/components/ui before building custom.",
+    "MUST use `sonner` for toasts."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not use generic centered layouts, simplistic gradients, and uniform styling.",
+    "DO NOT apply universal transition (e.g., transition: all).",
+    "DO NOT center align the app container (.App { text-align: center; }).",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Ensure the application is fully responsive and thumb-friendly on mobile.",
+    "All interactive elements must include a data-testid attribute for robust automated testing."
+  ]
+}
