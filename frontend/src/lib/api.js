@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BASE = process.env.REACT_APP_BACKEND_URL || "";
+const BASE = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
 
 export const api = axios.create({
   baseURL: `${BASE}/api`,
@@ -35,10 +35,7 @@ export async function parseResume(file) {
 }
 
 export async function gapAnalysis(resume_text, job_description) {
-  const fd = new FormData();
-  fd.append("resume_text", resume_text);
-  fd.append("job_description", job_description);
-  const r = await api.post("/gap-analysis", fd);
+  const r = await api.post("/gap-analysis", { resume_text, job_description });
   return r.data;
 }
 
@@ -46,3 +43,14 @@ export async function interviewPrep(payload) {
   const r = await api.post("/interview-prep", payload);
   return r.data;
 }
+
+export async function checkEligibility(payload) {
+  const r = await api.post("/eligibility", payload);
+  return r.data;
+}
+
+export async function compareCompanies(company_ids) {
+  const r = await api.post("/companies/compare", { company_ids });
+  return r.data;
+}
+

@@ -2,6 +2,7 @@ import React from "react";
 import { toast } from "sonner";
 import { Send, Sparkles, RotateCw, MessageSquare } from "lucide-react";
 import { chatAsk } from "../lib/api";
+import FormattedMarkdown from "../components/FormattedMarkdown";
 
 const SUGGESTIONS = [
   "Which companies hire for Data Analyst roles?",
@@ -39,6 +40,7 @@ export default function Chat() {
           content: res.answer,
           sources: res.sources,
           grounded: res.grounded,
+          matched_companies: res.matched_companies,
         },
       ]);
     } catch (e) {
@@ -189,12 +191,36 @@ function Bubble({ m }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] whitespace-pre-wrap p-4 text-sm leading-relaxed md:text-[15px] ${
+        className={`max-w-[85%] p-4 text-sm leading-relaxed md:text-[15px] ${
           isUser ? "bubble-user" : "bubble-ai"
         }`}
         data-testid={isUser ? "message-user" : "message-ai"}
       >
-        {m.content}
+        <FormattedMarkdown content={m.content} />
+
+        {/* Structured Company Cards */}
+        {!isUser && m.matched_companies && m.matched_companies.length > 0 && (
+          <div className="mt-4 border-t border-line pt-3 grid gap-3">
+            <div className="overline">MATCHED COMPANIES</div>
+            {m.matched_companies.map((c, i) => (
+              <div
+                key={i}
+                className="border border-line bg-paper p-3 font-body text-xs text-ink shadow-sm"
+              >
+                <div className="flex items-center justify-between font-bold text-sm">
+                  <span>{c.company}</span>
+                  <span className="font-mono text-signal">{c.ctc || "—"}</span>
+                </div>
+                <div className="mt-1 text-muted">Role: {c.role || "N/A"}</div>
+                <div className="mt-1 font-mono text-[11px] text-subtle">
+                  Eligible: {c.branches || "All"} | Cutoff: {c.cgpa || c.eligibility || "N/A"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Source Citations */}
         {m.sources && m.sources.length > 0 && (
           <div className="mt-3 border-t border-line pt-3">
             <div className="overline mb-2">SOURCES</div>

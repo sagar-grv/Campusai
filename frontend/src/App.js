@@ -8,12 +8,16 @@ import Chat from "./pages/Chat";
 import GapAnalysis from "./pages/GapAnalysis";
 import InterviewPrep from "./pages/InterviewPrep";
 import Companies from "./pages/Companies";
+import Eligibility from "./pages/Eligibility";
+import Compare from "./pages/Compare";
 
 const NAV = [
   { to: "/chat", label: "Ask" },
+  { to: "/eligibility", label: "Eligibility" },
   { to: "/gap", label: "Gap Analysis" },
   { to: "/interview", label: "Interview Prep" },
   { to: "/companies", label: "Companies" },
+  { to: "/compare", label: "Compare" },
 ];
 
 function Nav() {
@@ -29,7 +33,7 @@ function Nav() {
       <div className="mx-auto flex max-w-[1400px] items-center justify-between px-5 py-4 md:px-10">
         <Link to="/" className="flex items-center gap-2" data-testid="brand-link">
           <span className="h-6 w-6 bg-ink" aria-hidden />
-          <span className="font-display text-lg font-black tracking-tighter">
+          <span className="font-display text-lg font-black tracking-tighter text-ink">
             Campus<span className="text-signal">.AI</span>
           </span>
         </Link>
@@ -41,7 +45,7 @@ function Nav() {
               data-testid={`nav-${n.to.slice(1)}`}
               className={({ isActive }) =>
                 `overline px-3 py-2 transition-colors ${
-                  isActive ? "text-ink" : "text-muted hover:text-ink"
+                  isActive ? "text-ink font-bold" : "text-muted hover:text-ink"
                 }`
               }
             >
@@ -53,7 +57,7 @@ function Nav() {
           </Link>
         </nav>
         <button
-          className="md:hidden"
+          className="md:hidden text-ink"
           onClick={() => setOpen((v) => !v)}
           aria-label="menu"
           data-testid="mobile-menu-toggle"
@@ -70,7 +74,7 @@ function Nav() {
               data-testid={`mobile-nav-${n.to.slice(1)}`}
               className={({ isActive }) =>
                 `block border-b border-line px-5 py-4 font-display text-lg ${
-                  isActive ? "bg-paper text-ink" : "text-muted"
+                  isActive ? "bg-paper text-ink font-bold" : "text-muted"
                 }`
               }
             >
@@ -85,12 +89,12 @@ function Nav() {
 
 function Footer() {
   return (
-    <footer className="mt-16 border-t border-line bg-white">
+    <footer className="mt-16 border-t border-line bg-white text-ink">
       <div className="mx-auto grid max-w-[1400px] gap-8 px-5 py-10 md:grid-cols-4 md:px-10">
         <div>
           <div className="flex items-center gap-2">
             <span className="h-5 w-5 bg-ink" aria-hidden />
-            <span className="font-display text-base font-black tracking-tighter">
+            <span className="font-display text-base font-black tracking-tighter text-ink">
               Campus<span className="text-signal">.AI</span>
             </span>
           </div>
@@ -103,9 +107,11 @@ function Footer() {
           <p className="overline mb-3">Features</p>
           <ul className="space-y-2 text-sm">
             <li><Link to="/chat" className="hover:text-signal">Placement Assistant</Link></li>
+            <li><Link to="/eligibility" className="hover:text-signal">Eligibility Checker</Link></li>
             <li><Link to="/gap" className="hover:text-signal">Resume Gap Analysis</Link></li>
             <li><Link to="/interview" className="hover:text-signal">Interview Prep</Link></li>
             <li><Link to="/companies" className="hover:text-signal">Company Explorer</Link></li>
+            <li><Link to="/compare" className="hover:text-signal">Company Compare</Link></li>
           </ul>
         </div>
         <div>
@@ -141,9 +147,11 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/chat" element={<Chat />} />
+            <Route path="/eligibility" element={<Eligibility />} />
             <Route path="/gap" element={<GapAnalysis />} />
             <Route path="/interview" element={<InterviewPrep />} />
             <Route path="/companies" element={<Companies />} />
+            <Route path="/compare" element={<Compare />} />
           </Routes>
         </main>
         <Footer />
@@ -152,3 +160,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
+
