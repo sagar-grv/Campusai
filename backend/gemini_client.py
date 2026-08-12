@@ -20,6 +20,7 @@ def _normalize(vec: List[float]) -> List[float]:
 class GeminiClient:
     def __init__(self):
         self.api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        self.nv_key = os.environ.get("NVIDIA_API_KEY", "").strip()
         self.chat_model = os.environ.get("CHAT_MODEL", "gemini-2.5-flash")
         self.embed_model = os.environ.get("EMBED_MODEL", "gemini-embedding-001")
         self.embed_dim = EMBED_DIM
