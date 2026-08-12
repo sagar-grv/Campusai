@@ -228,34 +228,35 @@ async def seed_placement_data():
     print(f"[seed] Done. Loaded {len(documents)} embedded chunks into DB.")
 
 
+# ---------- initialization ----------
+async def ensure_initialized():
+    global mongo, db, gemini
+    if gemini is None:
+        gemini = GeminiClient()
+    if db is None or mongo is None:
+        try:
+            real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=1000)
+            await real_mongo.admin.command("ping")
+            mongo = real_mongo
+            print("[db] Connected to real MongoDB instance.")
+        except Exception as e:
+            print(f"[db] Real MongoDB unavailable ({e}), using in-memory mongomock_motor client.")
+            from mongomock_motor import AsyncMongoMockClient
+            mongo = AsyncMongoMockClient()
+        db = mongo[DB_NAME]
+        try:
+            await seed_placement_data()
+        except Exception as e:
+            print(f"[seed] Seeding exception: {e}")
+
+
 # ---------- lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global mongo, db, gemini
-    try:
-        real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=2000)
-        await real_mongo.admin.command("ping")
-        mongo = real_mongo
-        print("[db] Connected to real MongoDB instance.")
-    except Exception as e:
-        print(f"[db] Real MongoDB unavailable ({e}), using in-memory mongomock_motor client.")
-        from mongomock_motor import AsyncMongoMockClient
-        mongo = AsyncMongoMockClient()
-
-    db = mongo[DB_NAME]
-    gemini = GeminiClient()
-    # Ensure indexes
-    try:
-        await db.chunks.create_index("type")
-    except Exception:
-        pass
-
-    try:
-        await seed_placement_data()
-    except Exception as e:
-        print(f"[seed] Seeding exception: {e}")
+    await ensure_initialized()
     yield
-    mongo.close()
+    if mongo:
+        mongo.close()
 
 
 
@@ -272,6 +273,7 @@ app.add_middleware(
 # ---------- routes ----------
 @app.get("/api/health")
 async def health():
+    await ensure_initialized()
     ok = True
     try:
         await mongo.admin.command("ping")
@@ -280,8 +282,8 @@ async def health():
     seed = await db.meta.find_one({"_id": "placement_seed"})
     return {
         "ok": ok,
-        "chat_model": os.environ.get("CHAT_MODEL"),
-        "embed_model": os.environ.get("EMBED_MODEL"),
+        "chat_model": os.environ.get("CHAT_MODEL", "gemini-2.5-flash"),
+        "embed_model": os.environ.get("EMBED_MODEL", "gemini-embedding-001"),
         "gemini_ready": gemini is not None and gemini.ready,
         "companies_seeded": bool(seed),
     }
@@ -289,6 +291,7 @@ async def health():
 
 @app.get("/api/companies")
 async def list_companies(q: str = "", limit: int = 200):
+    await ensure_initialized()
     cursor = db.companies.find({}, {"_id": 0})
     docs = await cursor.to_list(length=1000)
     if q:
@@ -301,6 +304,7 @@ async def list_companies(q: str = "", limit: int = 200):
 
 @app.get("/api/stats")
 async def stats():
+    await ensure_initialized()
     total = await db.companies.count_documents({})
     ctc_values = []
     async for c in db.companies.find({"ctc": {"$ne": None}}, {"ctc": 1, "_id": 0}):
@@ -333,12 +337,13 @@ async def stats():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, request: Request):
+    await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
     rate_limiter.check_rate_limit(client_ip)
     check_prompt_injection(body.question)
 
-    if not gemini or not gemini.ready:
-        raise HTTPException(503, "GEMINI_API_KEY is not configured. Please set it in backend/.env")
+    if not gemini or (not gemini.ready and not os.environ.get("NVIDIA_API_KEY")):
+        raise HTTPException(503, "Neither GEMINI_API_KEY nor NVIDIA_API_KEY is configured.")
 
     # 1. Structured Keyword & Numeric Matching over db.companies
     ql = body.question.lower()
@@ -474,6 +479,7 @@ COMMON_TECH_SKILLS = [
 
 @app.post("/api/gap-analysis", response_model=GapAnalysisResponse)
 async def gap_analysis(req: GapAnalysisRequest, request: Request):
+    await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
     rate_limiter.check_rate_limit(client_ip)
     check_prompt_injection(req.resume_text)
@@ -482,8 +488,8 @@ async def gap_analysis(req: GapAnalysisRequest, request: Request):
     r_text = req.resume_text
     j_text = req.job_description
 
-    if not gemini or not gemini.ready:
-        raise HTTPException(503, "GEMINI_API_KEY is not configured.")
+    if not gemini or (not gemini.ready and not os.environ.get("NVIDIA_API_KEY")):
+        raise HTTPException(503, "Neither GEMINI_API_KEY nor NVIDIA_API_KEY is configured.")
     if len(r_text) < 15:
         raise HTTPException(400, "Resume text is too short. Please provide at least 15 characters.")
     if len(j_text) < 15:
@@ -557,11 +563,9 @@ async def gap_analysis(req: GapAnalysisRequest, request: Request):
         missing_skills=missing_skills[:20],
         improvements=improvements[:6],
         summary=summary,
-    )
-
-
 @app.post("/api/interview-prep", response_model=InterviewPrepResponse)
 async def interview_prep(body: InterviewPrepRequest, request: Request):
+    await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
     rate_limiter.check_rate_limit(client_ip)
     check_prompt_injection(body.job_description)
@@ -700,6 +704,7 @@ async def check_eligibility(req: EligibilityRequest):
 # ---------- company comparison ----------
 @app.post("/api/companies/compare")
 async def compare_companies(body: CompareRequest, request: Request):
+    await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
     rate_limiter.check_rate_limit(client_ip)
     if not body.company_ids:
