@@ -9,6 +9,7 @@ import {
   Code2,
 } from "lucide-react";
 import { interviewPrep } from "../lib/api";
+import { Stagger, StaggerItem, FadeUp } from "../components/motion";
 
 export default function InterviewPrep() {
   const [jd, setJd] = React.useState("");
@@ -165,10 +166,11 @@ export default function InterviewPrep() {
           {result && (
             <div className="space-y-4 fade-up">
               {/* Header */}
+              <FadeUp>
               <div className="sharp-card flex items-center justify-between p-5">
                 <div>
                   <div className="overline mb-1">GENERATED</div>
-                  <span className="font-display text-3xl font-black tracking-tighter">
+                  <span className="font-display text-3xl font-black tracking-tighter tabular-nums">
                     {totalQuestions}{" "}
                     <span className="text-lg text-muted">questions</span>
                   </span>
@@ -176,57 +178,64 @@ export default function InterviewPrep() {
                 <div className="flex gap-4">
                   <div className="text-center">
                     <Code2 size={18} className="mx-auto text-signal" strokeWidth={1.5} />
-                    <div className="mt-1 font-mono text-xs text-muted">
+                    <div className="mt-1 font-mono text-xs text-muted tabular-nums">
                       {result.technical?.length || 0} technical
                     </div>
                   </div>
                   <div className="text-center">
                     <Users size={18} className="mx-auto text-signal" strokeWidth={1.5} />
-                    <div className="mt-1 font-mono text-xs text-muted">
+                    <div className="mt-1 font-mono text-xs text-muted tabular-nums">
                       {result.behavioral?.length || 0} behavioral
                     </div>
                   </div>
                 </div>
               </div>
+              </FadeUp>
 
               {/* Technical */}
               {result.technical?.length > 0 && (
+                <FadeUp>
                 <div className="sharp-card">
                   <div className="flex items-center gap-2 border-b border-line bg-paper px-5 py-3">
                     <Code2 size={16} className="text-signal" strokeWidth={1.5} />
                     <span className="overline">TECHNICAL</span>
                   </div>
-                  <div className="divide-y divide-line">
+                  <Stagger className="divide-y divide-line" animate gap={0.05}>
                     {result.technical.map((q, i) => (
-                      <QuestionCard
-                        key={i}
-                        index={i + 1}
-                        q={q}
-                        type="technical"
-                      />
+                      <StaggerItem key={i}>
+                        <QuestionCard
+                          index={i + 1}
+                          q={q}
+                          type="technical"
+                        />
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 </div>
+                </FadeUp>
               )}
 
               {/* Behavioral */}
               {result.behavioral?.length > 0 && (
+                <FadeUp>
                 <div className="sharp-card">
                   <div className="flex items-center gap-2 border-b border-line bg-paper px-5 py-3">
                     <Users size={16} className="text-signal" strokeWidth={1.5} />
                     <span className="overline">BEHAVIORAL</span>
                   </div>
-                  <div className="divide-y divide-line">
+                  <Stagger className="divide-y divide-line" animate gap={0.05}>
                     {result.behavioral.map((q, i) => (
-                      <QuestionCard
-                        key={i}
-                        index={i + 1}
-                        q={q}
-                        type="behavioral"
-                      />
+                      <StaggerItem key={i}>
+                        <QuestionCard
+                          index={i + 1}
+                          q={q}
+                          type="behavioral"
+                        />
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 </div>
+                </FadeUp>
               )}
             </div>
           )}

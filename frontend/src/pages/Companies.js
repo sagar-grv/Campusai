@@ -3,7 +3,6 @@ import { toast } from "sonner";
 import {
   Search,
   Building2,
-  Loader2,
   Briefcase,
   IndianRupee,
   GraduationCap,
@@ -11,7 +10,9 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { motion } from "motion/react";
 import { listCompanies, getStats } from "../lib/api";
+import { CountUp } from "../components/motion";
 
 export default function Companies() {
   const [companies, setCompanies] = React.useState([]);
@@ -75,8 +76,9 @@ export default function Companies() {
             label="Avg CTC (LPA)"
             value={stats.avg_ctc_lpa}
             border
+            decimals={1}
           />
-          <MiniStat label="Max CTC (LPA)" value={stats.max_ctc_lpa} border />
+          <MiniStat label="Max CTC (LPA)" value={stats.max_ctc_lpa} border decimals={1} />
           <MiniStat
             label="Top Roles"
             value={stats.top_roles?.length || 0}
@@ -102,12 +104,29 @@ export default function Companies() {
 
       {/* Company list */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2
-            size={28}
-            className="animate-spin text-signal"
-            strokeWidth={1.5}
-          />
+        <div className="border border-line bg-white" aria-hidden="true">
+          <div className="hidden border-b border-line bg-paper px-5 py-3 md:grid md:grid-cols-12 md:gap-4">
+            <span className="overline col-span-3">COMPANY</span>
+            <span className="overline col-span-2">CTC</span>
+            <span className="overline col-span-3">ROLE</span>
+            <span className="overline col-span-2">BRANCHES</span>
+            <span className="overline col-span-2">BATCH</span>
+          </div>
+          {[...Array(8)].map((_, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 px-5 py-4 md:grid md:grid-cols-12 md:gap-4 ${
+                i > 0 ? "border-t border-line" : ""
+              }`}
+              style={{ opacity: 1 - i * 0.09 }}
+            >
+              <span className="skel h-4 w-40 md:col-span-3" />
+              <span className="skel col-span-2 h-3 w-12" />
+              <span className="skel col-span-3 hidden h-3 w-52 md:block" />
+              <span className="skel col-span-2 hidden h-3 w-32 md:block" />
+              <span className="skel col-span-2 h-3 w-10" />
+            </div>
+          ))}
         </div>
       ) : companies.length === 0 ? (
         <div className="sharp-card flex flex-col items-center justify-center p-12 text-center">
@@ -135,7 +154,17 @@ export default function Companies() {
             {companies.map((c, i) => {
               const isOpen = expanded === i;
               return (
-                <div key={i} data-testid={`company-row-${i}`}>
+                <motion.div
+                  key={`${i}-${query}`}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.3,
+                    ease: [0.23, 1, 0.32, 1],
+                    delay: Math.min(i * 0.02, 0.25),
+                  }}
+                  data-testid={`company-row-${i}`}
+                >
                   <button
                     className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-paper md:grid md:grid-cols-12"
                     onClick={() => setExpanded(isOpen ? null : i)}
@@ -248,7 +277,7 @@ export default function Companies() {
                       )}
                     </div>
                   )}
-                </div>
+                </motion.div>
               );
             })}
           </div>
@@ -258,13 +287,13 @@ export default function Companies() {
   );
 }
 
-function MiniStat({ label, value, border }) {
+function MiniStat({ label, value, border, decimals = 0 }) {
   return (
     <div
       className={`px-5 py-4 ${border ? "border-l border-white/20" : ""}`}
     >
       <div className="font-display text-2xl font-black tracking-tighter md:text-3xl">
-        {value}
+        <CountUp value={value} decimals={decimals} />
       </div>
       <div className="mt-1 font-mono text-[10px] uppercase tracking-widerX text-white/60">
         {label}

@@ -1,8 +1,10 @@
 import React from "react";
 import { toast } from "sonner";
 import { Send, Sparkles, RotateCw, MessageSquare } from "lucide-react";
+import { motion } from "motion/react";
 import { chatAsk } from "../lib/api";
 import FormattedMarkdown from "../components/FormattedMarkdown";
+import { EASE, Stagger, StaggerItem } from "../components/motion";
 
 const SUGGESTIONS = [
   "Which companies hire for Data Analyst roles?",
@@ -112,11 +114,15 @@ export default function Chat() {
                 </div>
               )}
               {messages.map((m, i) => (
-                <Bubble key={i} m={m} />
+                <Bubble key={i} m={m} index={i} />
               ))}
               {loading && (
-                <div className="flex items-center gap-2 text-muted" data-testid="chat-loading">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-signal" />
+                <div className="flex items-center gap-3 text-muted" data-testid="chat-loading">
+                  <span className="flex gap-1" aria-hidden="true">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" style={{ animationDelay: "0.15s" }} />
+                    <span className="typing-dot" style={{ animationDelay: "0.3s" }} />
+                  </span>
                   <span className="font-mono text-xs uppercase tracking-widerX">
                     Retrieving · Generating
                   </span>
@@ -156,22 +162,23 @@ export default function Chat() {
         <aside className="md:col-span-4" data-testid="chat-suggestions">
           <div className="sharp-card p-5">
             <div className="overline mb-4">TRY THESE</div>
-            <div className="grid gap-2">
+            <Stagger className="grid gap-2" animate gap={0.05} delay={0.1}>
               {SUGGESTIONS.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => send(s)}
-                  disabled={loading}
-                  className="group flex items-start justify-between gap-3 border border-line p-3 text-left text-sm transition-colors hover:border-ink hover:bg-paper disabled:opacity-50"
-                  data-testid={`suggestion-${i}`}
-                >
-                  <span>{s}</span>
-                  <span className="mt-0.5 text-subtle transition-colors group-hover:text-signal">
-                    →
-                  </span>
-                </button>
+                <StaggerItem key={i}>
+                  <button
+                    onClick={() => send(s)}
+                    disabled={loading}
+                    className="group flex w-full items-start justify-between gap-3 border border-line p-3 text-left text-sm transition-colors hover:border-ink hover:bg-paper disabled:opacity-50"
+                    data-testid={`suggestion-${i}`}
+                  >
+                    <span>{s}</span>
+                    <span className="mt-0.5 text-subtle transition-colors group-hover:text-signal">
+                      →
+                    </span>
+                  </button>
+                </StaggerItem>
               ))}
-            </div>
+            </Stagger>
           </div>
           <div className="mt-4 border border-line bg-ink p-5 text-white">
             <div className="overline text-white/60">GROUNDED · MEANS</div>
@@ -186,10 +193,16 @@ export default function Chat() {
   );
 }
 
-function Bubble({ m }) {
+function Bubble({ m, index }) {
   const isUser = m.role === "user";
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <motion.div
+      key={index}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: EASE }}
+      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+    >
       <div
         className={`max-w-[85%] p-4 text-sm leading-relaxed md:text-[15px] ${
           isUser ? "bubble-user" : "bubble-ai"
@@ -202,21 +215,24 @@ function Bubble({ m }) {
         {!isUser && m.matched_companies && m.matched_companies.length > 0 && (
           <div className="mt-4 border-t border-line pt-3 grid gap-3">
             <div className="overline">MATCHED COMPANIES</div>
-            {m.matched_companies.map((c, i) => (
-              <div
-                key={i}
-                className="border border-line bg-paper p-3 font-body text-xs text-ink shadow-sm"
-              >
-                <div className="flex items-center justify-between font-bold text-sm">
-                  <span>{c.company}</span>
-                  <span className="font-mono text-signal">{c.ctc || "—"}</span>
-                </div>
-                <div className="mt-1 text-muted">Role: {c.role || "N/A"}</div>
-                <div className="mt-1 font-mono text-[11px] text-subtle">
-                  Eligible: {c.branches || "All"} | Cutoff: {c.cgpa || c.eligibility || "N/A"}
-                </div>
-              </div>
-            ))}
+            <Stagger className="grid gap-3" animate gap={0.06}>
+              {m.matched_companies.map((c, i) => (
+                <StaggerItem key={i}>
+                  <div
+                    className="border border-line bg-paper p-3 font-body text-xs text-ink shadow-sm"
+                  >
+                    <div className="flex items-center justify-between font-bold text-sm">
+                      <span>{c.company}</span>
+                      <span className="font-mono text-signal">{c.ctc || "—"}</span>
+                    </div>
+                    <div className="mt-1 text-muted">Role: {c.role || "N/A"}</div>
+                    <div className="mt-1 font-mono text-[11px] text-subtle">
+                      Eligible: {c.branches || "All"} | Cutoff: {c.cgpa || c.eligibility || "N/A"}
+                    </div>
+                  </div>
+                </StaggerItem>
+              ))}
+            </Stagger>
           </div>
         )}
 
@@ -224,20 +240,21 @@ function Bubble({ m }) {
         {m.sources && m.sources.length > 0 && (
           <div className="mt-3 border-t border-line pt-3">
             <div className="overline mb-2">SOURCES</div>
-            <div className="flex flex-wrap gap-2">
+            <Stagger className="flex flex-wrap gap-2" animate gap={0.04}>
               {m.sources.map((s, i) => (
-                <span
-                  key={i}
-                  className="border border-line bg-paper px-2 py-1 font-mono text-[10px] uppercase tracking-widerX text-muted"
-                  data-testid={`source-tag-${i}`}
-                >
-                  {s.company || "doc"} · {s.score}
-                </span>
+                <StaggerItem key={i}>
+                  <span
+                    className="block border border-line bg-paper px-2 py-1 font-mono text-[10px] uppercase tracking-widerX text-muted"
+                    data-testid={`source-tag-${i}`}
+                  >
+                    {s.company || "doc"} · {s.score}
+                  </span>
+                </StaggerItem>
               ))}
-            </div>
+            </Stagger>
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

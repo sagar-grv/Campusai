@@ -13,6 +13,7 @@ import {
   FileCheck,
 } from "lucide-react";
 import { parseResume, gapAnalysis } from "../lib/api";
+import { CountUp, Stagger, StaggerItem } from "../components/motion";
 
 const SAMPLE_JDS = [
   {
@@ -293,7 +294,12 @@ export default function GapAnalysis() {
                     )}`}
                     data-testid="match-score"
                   >
-                    {result.match_score}%
+                    <CountUp
+                      value={result.match_score}
+                      suffix="%"
+                      decimals={0}
+                      duration={1.2}
+                    />
                   </div>
                 </div>
                 <div className="max-w-xs text-right text-xs text-muted">
@@ -303,24 +309,23 @@ export default function GapAnalysis() {
 
               {/* Matched & Missing skills */}
               <div className="grid gap-6 md:grid-cols-2">
-                <div className="sharp-card p-5">
+                                <div className="sharp-card p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <CheckCircle2 size={16} className="text-success" />
                     <span className="overline">MATCHED SKILLS ({result.matched_skills.length})</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <Stagger className="flex flex-wrap gap-1.5" animate gap={0.03}>
                     {result.matched_skills.map((s, i) => (
-                      <span
-                        key={i}
-                        className="bg-paper border border-line px-2.5 py-1 font-mono text-xs text-ink"
-                      >
-                        {s}
-                      </span>
+                      <StaggerItem key={i}>
+                        <span className="block bg-paper border border-line px-2.5 py-1 font-mono text-xs text-ink">
+                          {s}
+                        </span>
+                      </StaggerItem>
                     ))}
-                    {result.matched_skills.length === 0 && (
-                      <span className="text-xs text-muted">No direct skill matches found.</span>
-                    )}
-                  </div>
+                  </Stagger>
+                  {result.matched_skills.length === 0 && (
+                    <span className="text-xs text-muted">No direct skill matches found.</span>
+                  )}
                 </div>
 
                 <div className="sharp-card p-5">
@@ -328,35 +333,39 @@ export default function GapAnalysis() {
                     <XCircle size={16} className="text-error" />
                     <span className="overline">MISSING SKILLS ({result.missing_skills.length})</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <Stagger className="flex flex-wrap gap-1.5" animate gap={0.03}>
                     {result.missing_skills.map((s, i) => (
-                      <span
-                        key={i}
-                        className="bg-paper border border-line border-l-2 border-l-error px-2.5 py-1 font-mono text-xs text-ink"
-                      >
-                        {s}
-                      </span>
+                      <StaggerItem key={i}>
+                        <span className="block bg-paper border border-line border-l-2 border-l-error px-2.5 py-1 font-mono text-xs text-ink">
+                          {s}
+                        </span>
+                      </StaggerItem>
                     ))}
-                    {result.missing_skills.length === 0 && (
-                      <span className="text-xs text-success">All required skills matched!</span>
-                    )}
-                  </div>
+                  </Stagger>
+                  {result.missing_skills.length === 0 && (
+                    <span className="text-xs text-success">All required skills matched!</span>
+                  )}
                 </div>
               </div>
 
               {/* Actionable Improvements */}
               <div className="sharp-card p-6">
                 <div className="overline mb-3">ACTIONABLE IMPROVEMENTS</div>
-                <div className="space-y-3">
+                <Stagger className="space-y-3" animate gap={0.07}>
                   {result.improvements.map((imp, i) => (
-                    <div key={i} className="flex items-start gap-3 border-b border-line pb-3 last:border-0 last:pb-0">
-                      <span className="font-mono text-xs font-bold text-signal bg-ink text-white px-2 py-0.5">
-                        0{i + 1}
-                      </span>
-                      <p className="text-sm text-ink leading-relaxed">{imp}</p>
-                    </div>
+                    <StaggerItem
+                      key={i}
+                      className={i < result.improvements.length - 1 ? "border-b border-line" : ""}
+                    >
+                      <div className="flex items-start gap-3 pb-3 last:pb-0">
+                        <span className="font-mono text-xs font-bold text-signal bg-ink text-white px-2 py-0.5">
+                          0{i + 1}
+                        </span>
+                        <p className="text-sm text-ink leading-relaxed">{imp}</p>
+                      </div>
+                    </StaggerItem>
                   ))}
-                </div>
+                </Stagger>
               </div>
             </div>
           )}

@@ -2,6 +2,8 @@ import React from "react";
 import { BrowserRouter, Routes, Route, NavLink, Link, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { Menu, X } from "lucide-react";
+import { MotionConfig, motion, AnimatePresence, LayoutGroup } from "motion/react";
+import { EASE } from "./components/motion";
 
 import Landing from "./pages/Landing";
 import Chat from "./pages/Chat";
@@ -38,20 +40,33 @@ function Nav() {
           </span>
         </Link>
         <nav className="hidden items-center gap-1 md:flex" aria-label="primary">
-          {NAV.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              data-testid={`nav-${n.to.slice(1)}`}
-              className={({ isActive }) =>
-                `overline px-3 py-2 transition-colors ${
-                  isActive ? "text-ink font-bold" : "text-muted hover:text-ink"
-                }`
-              }
-            >
-              {n.label}
-            </NavLink>
-          ))}
+          <LayoutGroup>
+            {NAV.map((n) => (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                data-testid={`nav-${n.to.slice(1)}`}
+                className={({ isActive }) =>
+                  `relative overline px-3 py-2 transition-colors ${
+                    isActive ? "text-ink font-bold" : "text-muted hover:text-ink"
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    {n.label}
+                    {isActive && (
+                      <motion.span
+                        layoutId="nav-active"
+                        className="absolute inset-x-3 -bottom-px h-0.5 bg-signal"
+                        transition={{ duration: 0.3, ease: EASE }}
+                      />
+                    )}
+                  </>
+                )}
+              </NavLink>
+            ))}
+          </LayoutGroup>
           <Link to="/chat" className="btn-signal ml-3 !py-2 !px-4 text-sm" data-testid="cta-nav-ask">
             Ask now
           </Link>
@@ -65,24 +80,34 @@ function Nav() {
           {open ? <X size={22} /> : <Menu size={22} />}
         </button>
       </div>
-      {open && (
-        <div className="border-t border-line bg-white md:hidden" data-testid="mobile-menu">
-          {NAV.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              data-testid={`mobile-nav-${n.to.slice(1)}`}
-              className={({ isActive }) =>
-                `block border-b border-line px-5 py-4 font-display text-lg ${
-                  isActive ? "bg-paper text-ink font-bold" : "text-muted"
-                }`
-              }
-            >
-              {n.label}
-            </NavLink>
-          ))}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="mobile-menu"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: EASE }}
+            className="overflow-hidden border-t border-line bg-white md:hidden"
+            data-testid="mobile-menu"
+          >
+            {NAV.map((n) => (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                data-testid={`mobile-nav-${n.to.slice(1)}`}
+                className={({ isActive }) =>
+                  `block border-b border-line px-5 py-4 font-display text-lg ${
+                    isActive ? "bg-paper text-ink font-bold" : "text-muted"
+                  }`
+                }
+              >
+                {n.label}
+              </NavLink>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   );
 }
@@ -138,25 +163,40 @@ function Footer() {
   );
 }
 
+function AnimatedRoutes() {
+  const location = useLocation();
+  const first = React.useRef(true);
+  const skip = first.current;
+  first.current = false;
+
+  return (
+    <div key={location.pathname} className={skip ? "" : "route-fade"}>
+      <Routes location={location}>
+        <Route path="/" element={<Landing />} />
+        <Route path="/chat" element={<Chat />} />
+        <Route path="/eligibility" element={<Eligibility />} />
+        <Route path="/gap" element={<GapAnalysis />} />
+        <Route path="/interview" element={<InterviewPrep />} />
+        <Route path="/companies" element={<Companies />} />
+        <Route path="/compare" element={<Compare />} />
+      </Routes>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="flex min-h-screen flex-col bg-paper">
-        <Nav />
-        <main className="flex-1" data-testid="main-content">
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/eligibility" element={<Eligibility />} />
-            <Route path="/gap" element={<GapAnalysis />} />
-            <Route path="/interview" element={<InterviewPrep />} />
-            <Route path="/companies" element={<Companies />} />
-            <Route path="/compare" element={<Compare />} />
-          </Routes>
-        </main>
-        <Footer />
-        <Toaster position="top-right" richColors closeButton />
-      </div>
+      <MotionConfig reducedMotion="user">
+        <div className="flex min-h-screen flex-col bg-paper">
+          <Nav />
+          <main className="flex-1" data-testid="main-content">
+            <AnimatedRoutes />
+          </main>
+          <Footer />
+          <Toaster position="top-right" richColors closeButton />
+        </div>
+      </MotionConfig>
     </BrowserRouter>
   );
 }

@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { listCompanies, compareCompanies } from "../lib/api";
 import FormattedMarkdown from "../components/FormattedMarkdown";
+import { motion, AnimatePresence } from "motion/react";
+import { Stagger, StaggerItem, FadeUp } from "../components/motion";
 
 export default function Compare() {
   const [allCompanies, setAllCompanies] = React.useState([]);
@@ -81,20 +83,27 @@ export default function Compare() {
       <div className="mb-8 sharp-card p-6">
         <div className="overline mb-3">SELECT COMPANIES TO COMPARE</div>
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          {selectedIds.map((id) => {
-            const comp = allCompanies.find((c) => (c.id || c.company) === id);
-            return (
-              <span
-                key={id}
-                className="inline-flex items-center gap-1.5 bg-ink text-white px-3 py-1 font-mono text-xs rounded-full"
-              >
-                {comp?.company || id}
-                <button onClick={() => toggleSelect(comp || { id })}>
-                  <X size={12} />
-                </button>
-              </span>
-            );
-          })}
+          <AnimatePresence initial={false}>
+            {selectedIds.map((id) => {
+              const comp = allCompanies.find((c) => (c.id || c.company) === id);
+              return (
+                <motion.span
+                  key={id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.85 }}
+                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+                  className="inline-flex items-center gap-1.5 bg-ink text-white px-3 py-1 font-mono text-xs rounded-full"
+                >
+                  {comp?.company || id}
+                  <button onClick={() => toggleSelect(comp || { id })} aria-label={`remove ${comp?.company || id}`}>
+                    <X size={12} />
+                  </button>
+                </motion.span>
+              );
+            })}
+          </AnimatePresence>
           {selectedIds.length === 0 && (
             <span className="text-sm text-muted">
               No companies selected yet. Click companies below to select.
@@ -155,15 +164,18 @@ export default function Compare() {
       {comparison && (
         <div className="space-y-6 fade-up">
           {comparison.ai_comparison && (
-            <div className="sharp-card border-l-4 border-l-signal p-6 bg-paper">
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="text-signal" size={18} />
-                <span className="overline">AI COMPARATIVE INSIGHTS</span>
+            <FadeUp>
+              <div className="sharp-card border-l-4 border-l-signal p-6 bg-paper">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="text-signal" size={18} />
+                  <span className="overline">AI COMPARATIVE INSIGHTS</span>
+                </div>
+                <FormattedMarkdown content={comparison.ai_comparison} className="text-sm" />
               </div>
-              <FormattedMarkdown content={comparison.ai_comparison} className="text-sm" />
-            </div>
+            </FadeUp>
           )}
 
+          <Stagger animate gap={0.08}>
           <div className="overflow-x-auto border border-line bg-white">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -235,6 +247,7 @@ export default function Compare() {
               </tbody>
             </table>
           </div>
+          </Stagger>
         </div>
       )}
     </div>

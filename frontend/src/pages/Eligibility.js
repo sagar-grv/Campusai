@@ -14,6 +14,7 @@ import {
   Building2,
 } from "lucide-react";
 import { checkEligibility } from "../lib/api";
+import { CountUp, Stagger, StaggerItem } from "../components/motion";
 
 const BRANCHES = [
   "CS",
@@ -260,10 +261,10 @@ export default function Eligibility() {
               </div>
 
               {/* Company List Display */}
-              <div className="space-y-3">
+              <Stagger className="space-y-3" animate key={tab} gap={0.04}>
                 {tab === "eligible" &&
                   result.eligible.map((c, i) => (
-                    <div
+                    <StaggerItem
                       key={i}
                       className="sharp-card p-5 border-l-4 border-l-success"
                       data-testid={`eligible-company-${i}`}
@@ -303,12 +304,12 @@ export default function Eligibility() {
                           </span>
                         )}
                       </div>
-                    </div>
+                    </StaggerItem>
                   ))}
 
                 {tab === "ineligible" &&
                   result.ineligible.map((c, i) => (
-                    <div
+                    <StaggerItem
                       key={i}
                       className="sharp-card p-5 border-l-4 border-l-error"
                       data-testid={`ineligible-company-${i}`}
@@ -343,9 +344,9 @@ export default function Eligibility() {
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </StaggerItem>
                   ))}
-              </div>
+              </Stagger>
             </div>
           )}
         </div>
@@ -355,9 +356,22 @@ export default function Eligibility() {
 }
 
 function Metric({ label, value, sub, border }) {
+  const num = Number.parseFloat(String(value));
+  const isNumeric = !Number.isNaN(num);
   return (
     <div className={`p-4 ${border ? "border-l border-white/20" : ""}`}>
-      <div className="font-display text-3xl font-black">{value}</div>
+      <div className="font-display text-3xl font-black">
+        {isNumeric ? (
+          <CountUp
+            value={num}
+            suffix={String(value).slice(String(num).length)}
+            decimals={Number.isInteger(num) ? 0 : 1}
+            duration={0.9}
+          />
+        ) : (
+          value
+        )}
+      </div>
       <div className="overline mt-1 text-[10px] text-white/60">{label}</div>
       <div className="font-mono text-[10px] text-subtle">{sub}</div>
     </div>
