@@ -35,8 +35,8 @@ from security import (
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "campus_ai")
 CORS = os.environ.get("CORS_ORIGINS", "*")
 
 mongo: Optional[AsyncIOMotorClient] = None
@@ -563,6 +563,7 @@ async def gap_analysis(req: GapAnalysisRequest, request: Request):
         missing_skills=missing_skills[:20],
         improvements=improvements[:6],
         summary=summary,
+    )
 @app.post("/api/interview-prep", response_model=InterviewPrepResponse)
 async def interview_prep(body: InterviewPrepRequest, request: Request):
     await ensure_initialized()
