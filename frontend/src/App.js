@@ -7,6 +7,8 @@ import {
   Building2,
   GraduationCap,
   ArrowLeftRight,
+  MoonStar,
+  SunMedium,
 } from "lucide-react";
 import { MotionConfig, motion, LayoutGroup } from "motion/react";
 import { EASE } from "./components/motion";
@@ -17,6 +19,22 @@ import Companies from "./pages/Companies";
 import Eligibility from "./pages/Eligibility";
 import Compare from "./pages/Compare";
 import CompanyDetail from "./pages/CompanyDetail";
+
+const THEME_KEY = "campus-theme";
+
+function getSystemTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function resolveTheme(mode) {
+  return mode === "system" ? getSystemTheme() : mode;
+}
+
+function applyTheme(mode) {
+  const resolved = resolveTheme(mode);
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.style.colorScheme = resolved;
+}
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -140,53 +158,118 @@ function AskFab() {
 }
 
 function Nav() {
+  const [themeMode, setThemeMode] = React.useState(() => {
+    try {
+      return localStorage.getItem(THEME_KEY) || "system";
+    } catch {
+      return "system";
+    }
+  });
+
+  React.useEffect(() => {
+    applyTheme(themeMode);
+    try {
+      localStorage.setItem(THEME_KEY, themeMode);
+    } catch {
+      /* ignore */
+    }
+  }, [themeMode]);
+
+  React.useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      try {
+        if ((localStorage.getItem(THEME_KEY) || "system") === "system") {
+          applyTheme("system");
+        }
+      } catch {
+        applyTheme("system");
+      }
+    };
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+
+  const resolved = resolveTheme(themeMode);
+  const nextMode = themeMode === "system" ? "dark" : themeMode === "dark" ? "light" : "system";
+  const ThemeIcon = resolved === "dark" ? MoonStar : SunMedium;
+
   return (
     <header
       className="sticky top-0 z-40 border-b border-line bg-white/85 backdrop-blur-xl"
       data-testid="site-header"
     >
-      <div className="mx-auto flex max-w-[1400px] items-center justify-between px-5 py-4 md:px-10">
+      <div className="mx-auto flex max-w-[1400px] items-center gap-3 px-5 py-4 md:px-10">
         <Link to="/" className="flex items-center gap-2" data-testid="brand-link">
           <span className="h-6 w-6 bg-ink" aria-hidden />
           <span className="font-display text-lg font-black tracking-tighter text-ink">
             Campus<span className="text-signal">.AI</span>
           </span>
         </Link>
-        <nav className="hidden items-center gap-1 md:flex" aria-label="primary">
-          <LayoutGroup>
-            {NAV.map((n) => (
-              <NavLink
-                key={n.to}
-                to={n.to}
-                data-testid={`nav-${n.to.slice(1) || "home"}`}
-                className={({ isActive }) =>
-                  `relative overline px-3 py-2 transition-colors ${
-                    isActive ? "text-ink font-bold" : "text-muted hover:text-ink"
-                  }`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    {n.label}
-                    {isActive && (
-                      <motion.span
-                        layoutId="nav-active"
-                        className="absolute inset-x-3 -bottom-px h-0.5 bg-signal"
-                        transition={{ duration: 0.3, ease: EASE }}
-                      />
-                    )}
-                  </>
-                )}
-              </NavLink>
-            ))}
-          </LayoutGroup>
-          <Link to="/chat" className="btn-signal ml-3 !py-2 !px-4 text-sm" data-testid="cta-nav-ask">
-            Ask now
-          </Link>
-        </nav>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setThemeMode(nextMode)}
+            className="btn-outline !px-3 !py-2 text-xs"
+            aria-label={`Switch theme from ${themeMode}`}
+            aria-pressed={resolved === "dark"}
+            data-testid="theme-toggle"
+            title={`Current: ${themeMode}`}
+          >
+            <ThemeIcon size={15} strokeWidth={1.8} />
+            <span className="font-mono text-[10px] uppercase tracking-widerX">{themeMode}</span>
+          </button>
+          <nav className="hidden items-center gap-1 md:flex" aria-label="primary">
+            <LayoutGroup>
+              {NAV.map((n) => (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  data-testid={`nav-${n.to.slice(1) || "home"}`}
+                  className={({ isActive }) =>
+                    `relative overline px-3 py-2 transition-colors ${
+                      isActive ? "text-ink font-bold" : "text-muted hover:text-ink"
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {n.label}
+                      {isActive && (
+                        <motion.span
+                          layoutId="nav-active"
+                          className="absolute inset-x-3 -bottom-px h-0.5 bg-signal"
+                          transition={{ duration: 0.3, ease: EASE }}
+                        />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </LayoutGroup>
+            <Link to="/chat" className="btn-signal ml-3 !py-2 !px-4 text-sm" data-testid="cta-nav-ask">
+              Ask now
+            </Link>
+          </nav>
+        </div>
       </div>
     </header>
   );
+}
+
+function ThemeSync() {
+  React.useEffect(() => {
+    const stored = (() => {
+      try {
+        return localStorage.getItem(THEME_KEY) || "system";
+      } catch {
+        return "system";
+      }
+    })();
+    applyTheme(stored);
+  }, []);
+
+  return null;
 }
 
 function Footer() {
@@ -264,6 +347,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <MotionConfig reducedMotion="user">
+        <ThemeSync />
         <div className="flex min-h-screen flex-col bg-paper">
           <Nav />
           <main className="flex-1 pb-20 md:pb-0" data-testid="main-content">
