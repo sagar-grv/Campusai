@@ -238,7 +238,7 @@ async def ensure_initialized():
             print(f"[gemini] init error: {e}")
     if db is None or mongo is None:
         try:
-            real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=1000)
+            real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=10000)
             await real_mongo.admin.command("ping")
             mongo = real_mongo
             print("[db] Connected to real MongoDB instance.")

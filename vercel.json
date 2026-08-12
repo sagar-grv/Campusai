@@ -5,7 +5,13 @@
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": {
-        "includeFiles": "backend/**"
+        "includeFiles": [
+          "backend/server.py",
+          "backend/security.py",
+          "backend/gemini_client.py",
+          "backend/data/companies.json",
+          "backend/data/embedded_chunks_cache.json"
+        ]
       }
     },
     {
@@ -22,8 +28,16 @@
       "dest": "api/index.py"
     },
     {
-      "src": "/(.*)",
+      "src": "/static/(.*)",
+      "dest": "frontend/static/$1"
+    },
+    {
+      "src": "/(.*\\.[a-zA-Z0-9]+)$",
       "dest": "frontend/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/index.html"
     }
   ]
 }
