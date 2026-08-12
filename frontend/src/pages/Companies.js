@@ -1,5 +1,6 @@
 import React from "react";
 import { toast } from "sonner";
+import { Link } from "react-router-dom";
 import {
   Search,
   Building2,
@@ -14,18 +15,39 @@ import { motion } from "motion/react";
 import { listCompanies, getStats } from "../lib/api";
 import { CountUp } from "../components/motion";
 
+const BATCHES = ["", "2023-24", "2025"];
+const BRANCHES = ["", "CS", "IT", "EXTC", "MECH", "CIVIL", "MCA", "AI", "DS", "CSBS"];
+const SORTS = [
+  { value: "", label: "Default" },
+  { value: "ctc_desc", label: "CTC high → low" },
+  { value: "ctc_asc", label: "CTC low → high" },
+  { value: "name_asc", label: "Name A–Z" },
+];
+const PAGE_SIZES = [25, 50, 100];
+
 export default function Companies() {
   const [companies, setCompanies] = React.useState([]);
   const [stats, setStats] = React.useState(null);
   const [query, setQuery] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [expanded, setExpanded] = React.useState(null);
+  const [batch, setBatch] = React.useState("");
+  const [branch, setBranch] = React.useState("");
+  const [minCtc, setMinCtc] = React.useState("");
+  const [sort, setSort] = React.useState("");
+  const [pageSize, setPageSize] = React.useState(25);
+  const [page, setPage] = React.useState(1);
+  const [total, setTotal] = React.useState(0);
 
-  const fetchCompanies = React.useCallback(async (q) => {
+  const queryRef = React.useRef("");
+  const filterRef = React.useRef({ batch: "", branch: "", minCtc: "", sort: "", pageSize: 25 });
+
+  const fetchCompanies = React.useCallback(async (opts) => {
     setLoading(true);
     try {
-      const res = await listCompanies(q);
+      const res = await listCompanies(opts);
       setCompanies(res.companies || []);
+      setTotal(res.total ?? res.companies?.length ?? 0);
     } catch (err) {
       toast.error("Failed to load companies.");
     } finally {
@@ -33,17 +55,49 @@ export default function Companies() {
     }
   }, []);
 
-  React.useEffect(() => {
-    fetchCompanies("");
-    getStats().then(setStats).catch(() => {});
-  }, [fetchCompanies]);
+  const applyFilters = React.useCallback(
+    (p = 1) => {
+      setPage(p);
+      fetchCompanies({
+        q: queryRef.current,
+        ...filterRef.current,
+        page: p,
+        page_size: filterRef.current.pageSize,
+      });
+    },
+    [fetchCompanies]
+  );
 
-  // Debounced search
+  React.useEffect(() => {
+    applyFilters();
+    getStats().then(setStats).catch(() => {});
+  }, [applyFilters]);
+
+  function setFilter(key, value) {
+    filterRef.current = { ...filterRef.current, [key]: value };
+  }
+
   const timerRef = React.useRef(null);
   function handleSearch(val) {
     setQuery(val);
+    queryRef.current = val;
     clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => fetchCompanies(val), 350);
+    timerRef.current = setTimeout(() => applyFilters(1), 350);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  function handlePageSize(val) {
+    const size = Number(val);
+    setPageSize(size);
+    setFilter("pageSize", size);
+    applyFilters(1);
+  }
+
+  function handleFilterChange(setter, key, val) {
+    setter(val);
+    setFilter(key, val);
+    applyFilters(1);
   }
 
   return (
@@ -67,25 +121,140 @@ export default function Companies() {
 
       {/* Stats strip */}
       {stats && (
-        <div
-          className="mb-8 grid grid-cols-2 border border-line bg-ink text-white md:grid-cols-4"
-          data-testid="company-stats"
-        >
-          <MiniStat label="Total Companies" value={stats.total_companies} />
-          <MiniStat
-            label="Avg CTC (LPA)"
-            value={stats.avg_ctc_lpa}
-            border
-            decimals={1}
-          />
-          <MiniStat label="Max CTC (LPA)" value={stats.max_ctc_lpa} border decimals={1} />
-          <MiniStat
-            label="Top Roles"
-            value={stats.top_roles?.length || 0}
-            border
-          />
+        <div className="mb-8">
+          <div
+            className="grid grid-cols-2 border border-line bg-ink text-white md:grid-cols-4"
+            data-testid="company-stats"
+          >
+            <MiniStat label="Total Companies" value={stats.total_companies} />
+            <MiniStat
+              label="Avg CTC (LPA)"
+              value={stats.avg_ctc_lpa}
+              border
+              decimals={1}
+            />
+            <MiniStat label="Max CTC (LPA)" value={stats.max_ctc_lpa} border decimals={1} />
+            <MiniStat
+              label="Top Roles"
+              value={stats.top_roles?.length || 0}
+              border
+            />
+          </div>
+          {(stats.by_batch?.length > 0 || stats.top_recruiters?.length > 0) && (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="border border-line bg-white px-5 py-4" data-testid="company-stats-batches">
+                <div className="overline mb-3">DRIVES BY BATCH</div>
+                <div className="flex flex-wrap gap-2">
+                  {stats.by_batch.map((b) => (
+                    <span
+                      key={b.batch}
+                      className="border border-line bg-paper px-3 py-1.5 font-mono text-xs"
+                    >
+                      <span className="font-bold text-ink">{b.batch}</span>
+                      <span className="text-muted"> · {b.count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="border border-line bg-white px-5 py-4" data-testid="company-stats-recruiters">
+                <div className="overline mb-3">TOP RECRUITERS</div>
+                <div className="flex flex-wrap gap-2">
+                  {stats.top_recruiters.slice(0, 6).map((r) => (
+                    <span
+                      key={r.company}
+                      className="border border-line bg-paper px-3 py-1.5 font-mono text-xs"
+                    >
+                      <span className="font-bold text-ink">{r.company}</span>
+                      <span className="text-muted"> · {r.count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Filters */}
+      <div
+        className="mb-3 grid gap-3 border border-line bg-white p-3 md:grid-cols-5"
+        data-testid="company-filters"
+      >
+        <label className="flex flex-col gap-1">
+          <span className="overline">BATCH</span>
+          <select
+            value={batch}
+            onChange={(e) => handleFilterChange(setBatch, "batch", e.target.value)}
+            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+            data-testid="filter-batch"
+          >
+            <option value="">All</option>
+            {BATCHES.filter(Boolean).map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="overline">BRANCH</span>
+          <select
+            value={branch}
+            onChange={(e) => handleFilterChange(setBranch, "branch", e.target.value)}
+            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+            data-testid="filter-branch"
+          >
+            {BRANCHES.map((b) => (
+              <option key={b || "all"} value={b}>
+                {b || "All"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="overline">MIN CTC (LPA)</span>
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={minCtc}
+            onChange={(e) => handleFilterChange(setMinCtc, "minCtc", e.target.value)}
+            placeholder="Min CTC (LPA)"
+            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none placeholder:text-subtle focus:border-signal"
+            data-testid="filter-min-ctc"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="overline">SORT</span>
+          <select
+            value={sort}
+            onChange={(e) => handleFilterChange(setSort, "sort", e.target.value)}
+            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+            data-testid="filter-sort"
+          >
+            {SORTS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="overline">PER PAGE</span>
+          <select
+            value={pageSize}
+            onChange={(e) => handlePageSize(e.target.value)}
+            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+            data-testid="filter-page-size"
+          >
+            {PAGE_SIZES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       {/* Search */}
       <div className="sharp-card mb-6 flex items-center gap-3 px-4 py-3">
@@ -98,7 +267,7 @@ export default function Companies() {
           data-testid="company-search"
         />
         <span className="shrink-0 font-mono text-[10px] text-subtle">
-          {companies.length} results
+          {total || companies.length} results
         </span>
       </div>
 
@@ -155,7 +324,7 @@ export default function Companies() {
               const isOpen = expanded === i;
               return (
                 <motion.div
-                  key={`${i}-${query}`}
+                  key={`${i}-${query}-${page}`}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{
@@ -165,19 +334,26 @@ export default function Companies() {
                   }}
                   data-testid={`company-row-${i}`}
                 >
-                  <button
-                    className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-paper md:grid md:grid-cols-12"
+                  <div
+                    className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-paper md:grid md:grid-cols-12"
                     onClick={() => setExpanded(isOpen ? null : i)}
-                    data-testid={`company-toggle-${i}`}
                   >
-                    <span className="col-span-3 flex items-center gap-2 font-display text-sm font-bold tracking-tight md:text-base">
+                    <Link
+                      to={`/companies/${c.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="group col-span-3 flex items-center gap-2 font-display text-sm font-bold tracking-tight hover:text-signal md:text-base"
+                      data-testid={`company-detail-link-${i}`}
+                    >
                       <Building2
                         size={14}
                         className="shrink-0 text-signal"
                         strokeWidth={1.5}
                       />
-                      {c.company || "—"}
-                    </span>
+                      <span>{c.company || "—"}</span>
+                      <span className="font-mono text-[10px] uppercase tracking-widerX text-subtle transition-colors group-hover:text-signal">
+                        Details →
+                      </span>
+                    </Link>
                     <span className="col-span-2 font-mono text-xs md:text-sm">
                       {c.ctc || "—"}
                     </span>
@@ -191,13 +367,23 @@ export default function Companies() {
                       <span className="font-mono text-xs text-subtle">
                         {c.batch || c.source_file?.includes("2025") ? "2025" : "2023-24"}
                       </span>
-                      {isOpen ? (
-                        <ChevronUp size={14} className="text-subtle" />
-                      ) : (
-                        <ChevronDown size={14} className="text-subtle" />
-                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpanded(isOpen ? null : i);
+                        }}
+                        aria-label="toggle details"
+                        className="text-subtle transition-colors hover:text-ink"
+                        data-testid={`company-toggle-${i}`}
+                      >
+                        {isOpen ? (
+                          <ChevronUp size={14} />
+                        ) : (
+                          <ChevronDown size={14} />
+                        )}
+                      </button>
                     </span>
-                  </button>
+                  </div>
 
                   {/* Expanded detail */}
                   {isOpen && (
@@ -281,6 +467,35 @@ export default function Companies() {
               );
             })}
           </div>
+
+          {total > pageSize && (
+            <div
+              className="flex items-center justify-between border-t border-line bg-paper px-5 py-3"
+              data-testid="company-pagination"
+            >
+              <span className="font-mono text-[10px] uppercase tracking-widerX text-muted">
+                Page {page} of {totalPages} · {total} results
+              </span>
+              <div className="flex gap-2">
+                <button
+                  className="btn-outline !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
+                  disabled={page <= 1}
+                  onClick={() => applyFilters(page - 1)}
+                  data-testid="pagination-prev"
+                >
+                  ← Prev
+                </button>
+                <button
+                  className="btn-outline !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
+                  disabled={page >= totalPages}
+                  onClick={() => applyFilters(page + 1)}
+                  data-testid="pagination-next"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

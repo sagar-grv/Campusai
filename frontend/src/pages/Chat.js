@@ -2,7 +2,7 @@ import React from "react";
 import { toast } from "sonner";
 import { Send, Sparkles, RotateCw, MessageSquare } from "lucide-react";
 import { motion } from "motion/react";
-import { chatAsk } from "../lib/api";
+import { chatAsk, streamChat } from "../lib/api";
 import FormattedMarkdown from "../components/FormattedMarkdown";
 import { EASE, Stagger, StaggerItem } from "../components/motion";
 
@@ -15,46 +15,123 @@ const SUGGESTIONS = [
   "Which companies accept Mechanical branch?",
 ];
 
+const REFUSAL =
+  "I don't have enough information in the placement database to answer that confidently.";
+
 export default function Chat() {
   const [messages, setMessages] = React.useState([]);
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [sessionId, setSessionId] = React.useState(null);
   const bottomRef = React.useRef(null);
+  const pendingRef = React.useRef(null);
+  const countRef = React.useRef(0);
+  const streamingRef = React.useRef(false);
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  function appendMessage(msg) {
+    const idx = countRef.current;
+    countRef.current += 1;
+    setMessages((m) => [...m, msg]);
+    return idx;
+  }
+
   async function send(text) {
     const q = (text ?? input).trim();
-    if (!q || loading) return;
-    setMessages((m) => [...m, { role: "user", content: q }]);
+    if (!q || loading || streamingRef.current) return;
+    appendMessage({ role: "user", content: q });
     setInput("");
     setLoading(true);
-    try {
-      const res = await chatAsk(q, sessionId);
-      setSessionId(res.session_id);
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: res.answer,
-          sources: res.sources,
-          grounded: res.grounded,
-          matched_companies: res.matched_companies,
-        },
-      ]);
-    } catch (e) {
-      const msg = e?.response?.data?.detail || "Something went wrong.";
-      toast.error(msg);
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: `⚠ ${msg}`, sources: [], grounded: false },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+    streamingRef.current = true;
+    pendingRef.current = null;
+
+    streamChat(
+      q,
+      sessionId,
+      (meta) => {
+        setLoading(false);
+        if (meta?.session_id) setSessionId(meta.session_id);
+        const grounded = meta.grounded !== false;
+        let idx = pendingRef.current;
+        if (idx === null) {
+          idx = appendMessage({
+            role: "assistant",
+            content: "",
+            streaming: true,
+            sources: meta.sources || [],
+            matched_companies: meta.matched_companies || [],
+            grounded,
+          });
+          pendingRef.current = idx;
+        }
+        if (grounded === false) {
+          pendingRef.current = null;
+          setMessages((m) => {
+            const copy = [...m];
+            if (copy[idx] && copy[idx].role === "assistant") {
+              copy[idx] = { ...copy[idx], content: REFUSAL, streaming: false };
+            }
+            return copy;
+          });
+        }
+      },
+      (delta) => {
+        const idx = pendingRef.current;
+        if (idx === null) return;
+        setMessages((m) => {
+          const copy = [...m];
+          const last = copy[idx];
+          if (!last || last.role !== "assistant") return m;
+          copy[idx] = { ...last, content: last.content + (delta.text || "") };
+          return copy;
+        });
+      },
+      () => {
+        const idx = pendingRef.current;
+        if (idx !== null) {
+          setMessages((m) => {
+            const copy = [...m];
+            const last = copy[idx];
+            if (last && last.role === "assistant") {
+              copy[idx] = { ...last, streaming: false };
+            }
+            return copy;
+          });
+        }
+        streamingRef.current = false;
+        pendingRef.current = null;
+      },
+      async (err) => {
+        streamingRef.current = false;
+        pendingRef.current = null;
+        try {
+          const res = await chatAsk(q, sessionId);
+          setSessionId(res.session_id);
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              content: res.answer,
+              sources: res.sources,
+              grounded: res.grounded,
+              matched_companies: res.matched_companies,
+            },
+          ]);
+        } catch (e) {
+          const msg = e?.response?.data?.detail || "Something went wrong.";
+          toast.error(msg);
+          setMessages((m) => [
+            ...m,
+            { role: "assistant", content: `⚠ ${msg}`, sources: [], grounded: false },
+          ]);
+        } finally {
+          setLoading(false);
+        }
+      }
+    );
   }
 
   return (
@@ -210,6 +287,9 @@ function Bubble({ m, index }) {
         data-testid={isUser ? "message-user" : "message-ai"}
       >
         <FormattedMarkdown content={m.content} />
+        {m.streaming && (
+          <span className="stream-cursor text-signal">▍</span>
+        )}
 
         {/* Structured Company Cards */}
         {!isUser && m.matched_companies && m.matched_companies.length > 0 && (

@@ -1,9 +1,10 @@
 """
 Campus AI — Security, Rate Limiting & Strict LLM Guardrail Module
 """
+import os
 import time
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional
 from fastapi import HTTPException, Request
 
 # ---------- 1. Rate Limiting (Token / Sliding Window) ----------
@@ -15,7 +16,7 @@ class RateLimiter:
         self.window_seconds = window_seconds
         self.requests: Dict[str, List[float]] = {}
 
-    def check_rate_limit(self, client_ip: str):
+    def check_rate_limit(self, client_ip: str, limit: Optional[int] = None):
         now = time.time()
         window_start = now - self.window_seconds
 
@@ -23,11 +24,12 @@ class RateLimiter:
         timestamps = self.requests.get(client_ip, [])
         timestamps = [t for t in timestamps if t > window_start]
 
-        if len(timestamps) >= self.max_requests:
+        effective_limit = limit if limit is not None else self.max_requests
+        if len(timestamps) >= effective_limit:
             retry_after = int(self.window_seconds - (now - timestamps[0]))
             raise HTTPException(
                 status_code=429,
-                detail=f"Rate limit exceeded. Maximum {self.max_requests} requests per minute. Retry in {retry_after} seconds.",
+                detail=f"Rate limit exceeded. Maximum {effective_limit} requests per minute. Retry in {retry_after} seconds.",
                 headers={"Retry-After": str(retry_after)},
             )
 
@@ -35,7 +37,27 @@ class RateLimiter:
         self.requests[client_ip] = timestamps
 
 
-rate_limiter = RateLimiter(max_requests=25, window_seconds=60)
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+PER_ENDPOINT_LIMITS = {
+    "chat": 12,
+    "gap": 5,
+    "interview": 5,
+    "compare": 5,
+    "eligibility": 20,
+    "parse": 10,
+}
+
+
+rate_limiter = RateLimiter(
+    max_requests=_env_int("RATE_LIMIT_MAX", 25),
+    window_seconds=_env_int("RATE_LIMIT_WINDOW", 60),
+)
 
 
 # ---------- 2. Prompt Injection & Jailbreak Guardrails ----------

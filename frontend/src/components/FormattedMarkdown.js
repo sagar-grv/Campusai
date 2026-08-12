@@ -64,7 +64,7 @@ function renderInlineFormatting(text) {
   // Regex to split by **bold** text
   const parts = text.split(/(\*\*.*?\*\*)/g);
   return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endswith("**")) {
+    if (part.startsWith("**") && part.endsWith("**")) {
       return (
         <strong key={i} className="font-bold text-ink">
           {part.slice(2, -2)}

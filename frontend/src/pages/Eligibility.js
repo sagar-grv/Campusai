@@ -9,6 +9,7 @@ import {
   GraduationCap,
   Percent,
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   TrendingUp,
   Building2,
@@ -38,7 +39,10 @@ export default function Eligibility() {
   const [batch, setBatch] = React.useState("2025");
   const [loading, setLoading] = React.useState(false);
   const [result, setResult] = React.useState(null);
-  const [tab, setTab] = React.useState("eligible"); // "eligible" | "ineligible"
+  const [tab, setTab] = React.useState("eligible"); // "eligible" | "ineligible" | "marginal"
+
+  const marginal = result?.marginal || [];
+  const activeTab = tab === "marginal" && marginal.length === 0 ? "eligible" : tab;
 
   async function handleCheck(e) {
     if (e) e.preventDefault();
@@ -208,7 +212,11 @@ export default function Eligibility() {
           {result && (
             <div className="space-y-5 fade-up">
               {/* Summary Metrics */}
-              <div className="grid grid-cols-2 border border-line bg-ink text-white md:grid-cols-4">
+              <div
+                className={`grid grid-cols-2 border border-line bg-ink text-white ${
+                  (result.summary.marginal_count || 0) > 0 ? "md:grid-cols-5" : "md:grid-cols-4"
+                }`}
+              >
                 <Metric
                   label="ELIGIBLE DRIVES"
                   value={result.summary.eligible_count}
@@ -232,13 +240,21 @@ export default function Eligibility() {
                   sub="average package"
                   border
                 />
+                {(result.summary.marginal_count || 0) > 0 && (
+                  <Metric
+                    label="MARGINAL"
+                    value={result.summary.marginal_count}
+                    sub={`of ${result.summary.total_evaluated} companies`}
+                    border
+                  />
+                )}
               </div>
 
               {/* Tabs */}
               <div className="flex border-b border-line">
                 <button
                   className={`px-5 py-3 font-mono text-xs uppercase tracking-widerX transition-colors ${
-                    tab === "eligible"
+                    activeTab === "eligible"
                       ? "border-b-2 border-signal bg-paper font-bold text-ink"
                       : "text-muted hover:text-ink"
                   }`}
@@ -249,7 +265,7 @@ export default function Eligibility() {
                 </button>
                 <button
                   className={`px-5 py-3 font-mono text-xs uppercase tracking-widerX transition-colors ${
-                    tab === "ineligible"
+                    activeTab === "ineligible"
                       ? "border-b-2 border-error bg-paper font-bold text-ink"
                       : "text-muted hover:text-ink"
                   }`}
@@ -258,11 +274,24 @@ export default function Eligibility() {
                 >
                   Ineligible ({result.ineligible.length})
                 </button>
+                {marginal.length > 0 && (
+                  <button
+                    className={`px-5 py-3 font-mono text-xs uppercase tracking-widerX transition-colors ${
+                      activeTab === "marginal"
+                        ? "border-b-2 border-signal bg-paper font-bold text-ink"
+                        : "text-muted hover:text-ink"
+                    }`}
+                    onClick={() => setTab("marginal")}
+                    data-testid="tab-marginal"
+                  >
+                    Marginal ({marginal.length})
+                  </button>
+                )}
               </div>
 
               {/* Company List Display */}
-              <Stagger className="space-y-3" animate key={tab} gap={0.04}>
-                {tab === "eligible" &&
+              <Stagger className="space-y-3" animate key={activeTab} gap={0.04}>
+                {activeTab === "eligible" &&
                   result.eligible.map((c, i) => (
                     <StaggerItem
                       key={i}
@@ -307,7 +336,7 @@ export default function Eligibility() {
                     </StaggerItem>
                   ))}
 
-                {tab === "ineligible" &&
+                {activeTab === "ineligible" &&
                   result.ineligible.map((c, i) => (
                     <StaggerItem
                       key={i}
@@ -339,6 +368,49 @@ export default function Eligibility() {
                           <div
                             key={idx}
                             className="flex items-center gap-1.5 font-mono text-xs text-error"
+                          >
+                            <AlertCircle size={12} /> {r}
+                          </div>
+                        ))}
+                      </div>
+                    </StaggerItem>
+                  ))}
+
+                {activeTab === "marginal" &&
+                  marginal.map((c, i) => (
+                    <StaggerItem
+                      key={i}
+                      className="sharp-card p-5 border-l-4 border-l-signal"
+                      data-testid={`marginal-company-${i}`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle
+                              size={16}
+                              className="text-signal"
+                              strokeWidth={1.5}
+                            />
+                            <h3 className="font-display text-xl font-bold">
+                              {c.company}
+                            </h3>
+                            <span className="border border-signal px-2 py-0.5 font-mono text-[10px] uppercase tracking-widerX text-signal">
+                              marginal
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-muted">
+                            Role: {c.role || "N/A"}
+                          </p>
+                        </div>
+                        <span className="font-mono text-sm font-bold text-signal">
+                          {c.ctc || "—"}
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-1">
+                        {(c.reasons || []).map((r, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center gap-1.5 font-mono text-xs text-signal"
                           >
                             <AlertCircle size={12} /> {r}
                           </div>

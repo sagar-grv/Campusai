@@ -18,6 +18,7 @@ import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
@@ -30,6 +31,7 @@ from security import (
     check_domain_scope,
     sanitize_log_message,
     STRICT_SYSTEM_GUARDRAILS,
+    PER_ENDPOINT_LIMITS,
 )
 
 ROOT = Path(__file__).parent
@@ -38,6 +40,7 @@ load_dotenv(ROOT / ".env")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "campus_ai")
 CORS = os.environ.get("CORS_ORIGINS", "*")
+SEED_VERSION = 2
 
 mongo: Optional[AsyncIOMotorClient] = None
 db = None
@@ -75,6 +78,7 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=6, ge=1, le=12)
     session_id: Optional[str] = None
+    stream: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -146,7 +150,7 @@ def parse_resume(filename: str, content: bytes) -> str:
 async def seed_placement_data():
     """One-time seeding of company placement DB into MongoDB with embeddings."""
     seed_marker = await db.meta.find_one({"_id": "placement_seed"})
-    if seed_marker:
+    if seed_marker and seed_marker.get("version") == SEED_VERSION:
         return
 
     companies_path = ROOT / "data" / "companies.json"
@@ -307,9 +311,31 @@ async def health():
     }
 
 
+def batch_of(doc: dict) -> str:
+    src = str(doc.get("source_file") or "")
+    if "2023" in src:
+        return "2023-24"
+    if "2025" in src:
+        return "2025"
+    batch_val = str(doc.get("batch") or "").strip()
+    if batch_val in ("2023-24", "2025"):
+        return batch_val
+    return "Other"
+
+
 @app.get("/api/companies")
-async def list_companies(q: str = "", limit: int = 200):
+async def list_companies(
+    q: str = "",
+    batch: str = "",
+    branch: str = "",
+    min_ctc: float = 0.0,
+    sort: str = "",
+    page: int = 1,
+    page_size: int = 25,
+):
     await ensure_initialized()
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
     cursor = db.companies.find({}, {"_id": 0})
     docs = await cursor.to_list(length=1000)
     if q:
@@ -317,51 +343,245 @@ async def list_companies(q: str = "", limit: int = 200):
         docs = [d for d in docs if any(
             ql in str(d.get(k, "")).lower() for k in ("company", "role", "branches", "eligibility")
         )]
-    return {"companies": docs[:limit], "total": len(docs)}
+    if batch:
+        docs = [d for d in docs if batch_of(d) == batch]
+    if branch:
+        bl = branch.lower()
+        docs = [d for d in docs if bl in str(d.get("branches") or "").lower() or bl in str(d.get("eligibility") or "").lower()]
+    if min_ctc and min_ctc > 0:
+        docs = [d for d in docs if (_extract_ctc_float(d.get("ctc")) or 0) >= min_ctc]
+    if sort == "ctc_desc":
+        docs.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0, reverse=True)
+    elif sort == "ctc_asc":
+        docs.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0)
+    elif sort in ("name", "name_asc"):
+        docs.sort(key=lambda x: str(x.get("company") or "").lower())
+    total = len(docs)
+    start = (page - 1) * page_size
+    return {"companies": docs[start:start + page_size], "total": total, "page": page, "page_size": page_size}
 
 
-@app.get("/api/stats")
-async def stats():
+@app.get("/api/companies/stats")
+async def companies_stats():
     await ensure_initialized()
     total = await db.companies.count_documents({})
     ctc_values = []
-    async for c in db.companies.find({"ctc": {"$ne": None}}, {"ctc": 1, "_id": 0}):
-        v = c.get("ctc") or ""
-        # extract first float
-        buf = ""
-        for ch in v:
-            if ch.isdigit() or ch == ".":
-                buf += ch
-            elif buf:
-                break
-        try:
-            if buf:
-                ctc_values.append(float(buf))
-        except Exception:
-            pass
+    by_batch = {}
+    top_recruiters = {}
     top_roles = {}
-    async for c in db.companies.find({}, {"role": 1, "_id": 0}):
+    async for c in db.companies.find({}, {"ctc": 1, "role": 1, "company": 1, "source_file": 1, "_id": 0}):
+        v = _extract_ctc_float(c.get("ctc"))
+        if v:
+            ctc_values.append(v)
+        b = batch_of(c)
+        by_batch[b] = by_batch.get(b, 0) + 1
+        name = str(c.get("company") or "").strip()
+        if name:
+            top_recruiters[name] = top_recruiters.get(name, 0) + 1
         r = (c.get("role") or "").split(",")[0].strip()[:40]
         if r:
             top_roles[r] = top_roles.get(r, 0) + 1
     top_roles_sorted = sorted(top_roles.items(), key=lambda x: -x[1])[:6]
+    top_recruiters_sorted = sorted(top_recruiters.items(), key=lambda x: -x[1])[:8]
     return {
         "total_companies": total,
         "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
         "max_ctc_lpa": round(max(ctc_values), 2) if ctc_values else 0,
+        "by_batch": [{"batch": b, "count": n} for b, n in sorted(by_batch.items())],
+        "top_recruiters": [{"company": c, "count": n} for c, n in top_recruiters_sorted],
         "top_roles": [{"role": r, "count": n} for r, n in top_roles_sorted],
     }
+
+
+@app.get("/api/stats")
+async def stats():
+    return await companies_stats()
+
+
+@app.get("/api/companies/{company_id}")
+async def get_company(company_id: str):
+    await ensure_initialized()
+    doc = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    if not doc:
+        doc = await db.companies.find_one({"company": company_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Company not found.")
+    return doc
+
+
+NO_ANSWER_TEXT = (
+    "I don't have enough information in the placement database to answer that "
+    "confidently. Try asking about a specific company (e.g., 'What is Infosys "
+    "eligibility?') or a role (e.g., 'Which companies hire for Data Analyst?')."
+)
+
+CHAT_SYSTEM = STRICT_SYSTEM_GUARDRAILS
+
+
+def sse(dict_payload: dict) -> str:
+    return f"data: {json.dumps(dict_payload)}\n\n"
+
+
+async def build_chat_context(question: str, top_k: int):
+    """Shared retrieval for both the POST and streaming chat paths."""
+    ql = question.lower()
+    keyword_matches = []
+
+    import re
+    num_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:lpa|ctc|lacs|lakh|lakhs)?', ql)
+    target_num = float(num_match.group(1)) if num_match else None
+    is_greater_query = any(k in ql for k in ["more", "above", "greater", "higher", ">", "at least", "min"])
+    is_highest_query = any(k in ql for k in ["highest", "max", "top", "best", "maximum"])
+    is_criteria_query = any(k in ql for k in ["%", "percent", "cgpa", "backlog", "percentage", "cutoff", "criteria", "eligibility"])
+
+    async for c in db.companies.find({}, {"_id": 0}):
+        comp_name = str(c.get("company") or "").lower()
+        role_name = str(c.get("role") or "").lower()
+        branches_name = str(c.get("branches") or "").lower()
+        elig_name = f"{c.get('eligibility') or ''} {c.get('cgpa') or ''}".lower()
+        ctc_float = _extract_ctc_float(c.get("ctc"))
+
+        if comp_name and comp_name in ql:
+            if c not in keyword_matches:
+                keyword_matches.append(c)
+        elif is_highest_query and ctc_float and ctc_float >= 15.0:
+            if c not in keyword_matches:
+                keyword_matches.append(c)
+        elif is_greater_query and target_num and ctc_float and ctc_float >= target_num:
+            if c not in keyword_matches:
+                keyword_matches.append(c)
+        elif is_criteria_query and target_num and (f"{int(target_num)}%" in elig_name or f"{target_num}" in elig_name):
+            if c not in keyword_matches and len(keyword_matches) < 8:
+                keyword_matches.append(c)
+        elif role_name and any(term in ql for term in role_name.split() if len(term) > 3):
+            if c not in keyword_matches and len(keyword_matches) < 6:
+                keyword_matches.append(c)
+
+    if is_greater_query or is_highest_query:
+        keyword_matches.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0, reverse=True)
+
+    q_vec = (await gemini.embed_many([question], task_type="RETRIEVAL_QUERY"))[0]
+    hits = []
+    async for doc in db.chunks.find({"type": "placement"}, {"text": 1, "source": 1, "embedding": 1, "company_data": 1}):
+        emb = doc.get("embedding")
+        if not emb or len(emb) != len(q_vec):
+            continue
+        score = cosine(q_vec, emb)
+        hits.append({
+            "text": doc["text"],
+            "source": doc.get("source", "placement_db"),
+            "score": score,
+            "company": (doc.get("company_data") or {}).get("company"),
+        })
+    hits.sort(key=lambda x: x["score"], reverse=True)
+    top = hits[: top_k]
+
+    grounded = (len(top) > 0 and top[0]["score"] >= 0.20) or len(keyword_matches) > 0
+
+    context_parts = []
+    for i, h in enumerate(top):
+        context_parts.append(f"[Doc {i+1} | source={h['source']} | similarity={h['score']:.2f}]\n{h['text']}")
+    for km in keyword_matches[:6]:
+        context_parts.append(
+            f"[Structured Match | Company={km.get('company')}]\n"
+            f"Company: {km.get('company')}. Role: {km.get('role')}. CTC: {km.get('ctc')}. "
+            f"Branches: {km.get('branches')}. Eligibility: {km.get('eligibility') or km.get('cgpa')}. Notes: {km.get('notes')}."
+        )
+
+    matched_comps = keyword_matches[:4]
+    if not matched_comps and top:
+        for h in top:
+            c_name = h.get("company")
+            if c_name:
+                comp_doc = await db.companies.find_one({"company": c_name}, {"_id": 0})
+                if comp_doc and comp_doc not in matched_comps:
+                    matched_comps.append(comp_doc)
+            if len(matched_comps) >= 3:
+                break
+
+    return {
+        "context": "\n\n".join(context_parts),
+        "sources": [{"source": h["source"], "score": round(h["score"], 3), "company": h["company"]} for h in top[:5]],
+        "grounded": grounded,
+        "matched_comps": matched_comps,
+        "session_id": str(uuid.uuid4()),
+    }
+
+
+def stream_chat_response(ctx: dict, question: str):
+    async def gen():
+        yield sse({
+            "type": "meta",
+            "sources": ctx["sources"],
+            "matched_companies": ctx["matched_comps"],
+            "session_id": ctx["session_id"],
+            "grounded": ctx["grounded"],
+        })
+        if not ctx["grounded"]:
+            yield sse({"type": "done"})
+            return
+        prompt = f"CONTEXT:\n{ctx['context']}\n\nSTUDENT QUESTION:\n{question}\n\nGrounded answer:"
+        try:
+            async for chunk in gemini.generate_stream(system=CHAT_SYSTEM, prompt=prompt, temperature=0.15, max_tokens=850):
+                if "Fallback response: Unable to reach AI models" in chunk:
+                    yield sse({"type": "error", "detail": "AI generation temporarily unavailable. Please try again in a moment."})
+                    return
+                if chunk:
+                    yield sse({"type": "delta", "text": chunk})
+        except Exception as e:
+            print(f"[chat-stream] generation error: {e}")
+            yield sse({"type": "error", "detail": "AI generation failed mid-stream. Please retry."})
+            return
+        yield sse({"type": "done"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, request: Request):
     await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    rate_limiter.check_rate_limit(client_ip)
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["chat"])
     check_prompt_injection(body.question)
+
+    if not check_domain_scope(body.question):
+        return ChatResponse(
+            answer=NO_ANSWER_TEXT,
+            sources=[],
+            grounded=False,
+            session_id=body.session_id or str(uuid.uuid4()),
+            matched_companies=[],
+        )
 
     if not gemini or (not gemini.ready and not os.environ.get("NVIDIA_API_KEY")):
         raise HTTPException(503, "Neither GEMINI_API_KEY nor NVIDIA_API_KEY is configured.")
+
+    ctx = await build_chat_context(body.question, body.top_k)
+
+    if body.stream:
+        return stream_chat_response(ctx, body.question)
+
+    if not ctx["grounded"]:
+        return ChatResponse(
+            answer=NO_ANSWER_TEXT,
+            sources=[],
+            grounded=False,
+            session_id=ctx["session_id"],
+            matched_companies=[],
+        )
+
+    prompt = f"CONTEXT:\n{ctx['context']}\n\nSTUDENT QUESTION:\n{body.question}\n\nGrounded answer:"
+    answer = await gemini.generate(system=CHAT_SYSTEM, prompt=prompt, temperature=0.15, max_tokens=850)
+    if "Fallback response: Unable to reach AI models" in answer:
+        raise HTTPException(503, "AI generation temporarily unavailable. Please try again in a moment.")
+
+    return ChatResponse(
+        answer=answer,
+        sources=ctx["sources"],
+        grounded=True,
+        session_id=ctx["session_id"],
+        matched_companies=ctx["matched_comps"],
+    )
 
     # 1. Structured Keyword & Numeric Matching over db.companies
     ql = body.question.lower()
@@ -479,7 +699,9 @@ async def chat(body: ChatRequest, request: Request):
 
 
 @app.post("/api/resume/parse")
-async def resume_parse(file: UploadFile = File(...)):
+async def resume_parse(file: UploadFile = File(...), request: Request = None):
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["parse"])
     content = await file.read()
     text = parse_resume(file.filename, content)
     return {"filename": file.filename, "text": text, "chars": len(text)}
@@ -499,7 +721,7 @@ COMMON_TECH_SKILLS = [
 async def gap_analysis(req: GapAnalysisRequest, request: Request):
     await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    rate_limiter.check_rate_limit(client_ip)
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["gap"])
     check_prompt_injection(req.resume_text)
     check_prompt_injection(req.job_description)
 
@@ -532,6 +754,8 @@ async def gap_analysis(req: GapAnalysisRequest, request: Request):
         f"Return ONLY the JSON."
     )
     raw = await gemini.generate(system=system, prompt=prompt, temperature=0.1, max_tokens=900)
+    if "Fallback response: Unable to reach AI models" in raw:
+        raise HTTPException(503, "AI generation temporarily unavailable. Please try again in a moment.")
     data = _safe_json(raw)
 
     # Fallback skill keyword extraction if LLM JSON was missing or empty
@@ -552,6 +776,11 @@ async def gap_analysis(req: GapAnalysisRequest, request: Request):
         matched_skills = fallback_matched
     if not missing_skills and fallback_missing:
         missing_skills = fallback_missing
+
+    r_hay = r_text.lower()
+    j_hay = j_text.lower()
+    matched_skills = [s for s in matched_skills if s and (str(s).lower() in r_hay or str(s).lower() in j_hay)][:20]
+    missing_skills = [s for s in missing_skills if s and str(s).lower() in j_hay][:20]
 
     calc_score = 0
     if jd_found:
@@ -586,7 +815,7 @@ async def gap_analysis(req: GapAnalysisRequest, request: Request):
 async def interview_prep(body: InterviewPrepRequest, request: Request):
     await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    rate_limiter.check_rate_limit(client_ip)
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["interview"])
     check_prompt_injection(body.job_description)
     if body.missing_skills:
         for s in body.missing_skills:
@@ -605,38 +834,41 @@ async def interview_prep(body: InterviewPrepRequest, request: Request):
         "Include roughly 70% technical, 30% behavioral. Do NOT wrap in markdown."
     )
     missing = ", ".join(body.missing_skills or []) or "(none provided; base on JD only)"
+    total_q = body.num_questions
+    n_tech = max(1, round(total_q * 0.7))
+    n_beh = max(0, total_q - n_tech)
     prompt = (
         f"Job description:\n{body.job_description[:5000]}\n\n"
         f"Candidate's known skill gaps: {missing}\n\n"
-        f"Generate about {body.num_questions} questions total."
+        f"Generate exactly {n_tech} technical and {n_beh} behavioral questions."
     )
     raw = await gemini.generate(system=system, prompt=prompt, temperature=0.3, max_tokens=1400)
+    if "Fallback response: Unable to reach AI models" in raw:
+        raise HTTPException(503, "AI generation temporarily unavailable. Please try again in a moment.")
     data = _safe_json(raw)
     return InterviewPrepResponse(
-        technical=list(data.get("technical", []))[: body.num_questions],
-        behavioral=list(data.get("behavioral", []))[: body.num_questions],
+        technical=list(data.get("technical", []))[:n_tech],
+        behavioral=list(data.get("behavioral", []))[:n_beh],
     )
 
 
 # ---------- eligibility checker ----------
 @app.post("/api/eligibility")
-async def check_eligibility(req: EligibilityRequest):
+async def check_eligibility(req: EligibilityRequest, request: Request):
+    await ensure_initialized()
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["eligibility"])
     cursor = db.companies.find({}, {"_id": 0})
     all_companies = await cursor.to_list(length=1000)
 
     # Filter batch if specified
     if req.batch:
-        req_batch = req.batch.lower()
-        all_companies = [
-            c for c in all_companies
-            if req_batch in str(c.get("batch") or "").lower()
-            or (req_batch in "2025" and "2025" in str(c.get("source_file") or ""))
-            or (req_batch in "2023" and "2023" in str(c.get("source_file") or ""))
-        ]
+        all_companies = [c for c in all_companies if batch_of(c) == req.batch]
 
     user_branch = req.branch.upper().strip()
     eligible_list = []
     ineligible_list = []
+    marginal_list = []
     eligible_ctcs = []
 
     for c in all_companies:
@@ -690,12 +922,24 @@ async def check_eligibility(req: EligibilityRequest):
                 is_eligible = False
                 reasons.append("Company rejects candidates with active backlogs / KTs")
 
+        # Marginal band: ineligible only by a small/single criterion
+        is_marginal = False
+        if not is_eligible and len(reasons) == 1:
+            only = reasons[0]
+            if "CGPA below required cutoff" in only and cgpa_req is not None and (cgpa_req - req.cgpa) <= 0.5:
+                is_marginal = True
+            elif "Academic percentage below required" in only and pct_req is not None and (pct_req - min(req.tenth_pct, req.twelfth_pct)) <= 5.0:
+                is_marginal = True
+            elif "backlogs / KTs" in only:
+                is_marginal = True
+
         # Parse numeric CTC for stats
         ctc_val = _extract_ctc_float(c.get("ctc"))
 
         company_res = {
             **c,
             "is_eligible": is_eligible,
+            "is_marginal": is_marginal,
             "reasons": reasons if not is_eligible else ["All criteria satisfied"],
         }
 
@@ -703,6 +947,8 @@ async def check_eligibility(req: EligibilityRequest):
             eligible_list.append(company_res)
             if ctc_val:
                 eligible_ctcs.append(ctc_val)
+        elif is_marginal:
+            marginal_list.append(company_res)
         else:
             ineligible_list.append(company_res)
 
@@ -711,12 +957,15 @@ async def check_eligibility(req: EligibilityRequest):
             "total_evaluated": len(all_companies),
             "eligible_count": len(eligible_list),
             "ineligible_count": len(ineligible_list),
+            "marginal_count": len(marginal_list),
+            "marginal_percentage": round((len(marginal_list) / len(all_companies) * 100), 1) if all_companies else 0,
             "eligible_percentage": round((len(eligible_list) / len(all_companies) * 100), 1) if all_companies else 0,
             "max_eligible_ctc": round(max(eligible_ctcs), 2) if eligible_ctcs else 0,
             "avg_eligible_ctc": round(sum(eligible_ctcs) / len(eligible_ctcs), 2) if eligible_ctcs else 0,
         },
         "eligible": eligible_list,
         "ineligible": ineligible_list,
+        "marginal": marginal_list,
     }
 
 
@@ -725,7 +974,7 @@ async def check_eligibility(req: EligibilityRequest):
 async def compare_companies(body: CompareRequest, request: Request):
     await ensure_initialized()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    rate_limiter.check_rate_limit(client_ip)
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["compare"])
     if not body.company_ids:
         raise HTTPException(400, "Please provide at least one company ID to compare.")
     cursor = db.companies.find({"id": {"$in": body.company_ids}}, {"_id": 0})
@@ -753,6 +1002,8 @@ async def compare_companies(body: CompareRequest, request: Request):
         prompt = f"Companies to compare:\n{comp_summary}\n\nProvide a concise 3-bullet comparative summary."
         try:
             comparison_ai = await gemini.generate(system=system, prompt=prompt, temperature=0.2, max_tokens=600)
+            if "Fallback response: Unable to reach AI models" in comparison_ai:
+                comparison_ai = "AI comparative insights are unavailable right now. The structured comparison below is complete."
         except Exception as e:
             comparison_ai = f"AI comparison unavailable: {e}"
 

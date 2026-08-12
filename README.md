@@ -33,10 +33,10 @@ Campus AI offers **6 interconnected placement tools**:
 | Tool | Route | Description |
 |---|---|---|
 | **💬 Placement Assistant (RAG Chat)** | `/chat` | Grounded Q&A over 115 company placement drives. Combines MongoDB structured filters with 768-dim vector embeddings and displays interactive company cards alongside source citations. |
-| **🎓 Personalized Eligibility Auditor** | `/eligibility` | Real-time audit of student CGPA, branch, 10th/12th percentages, and active/dead backlogs. Instantly separates qualifying companies from disqualifying drives with exact refusal reasons. |
+| **🎓 Personalized Eligibility Auditor** | `/eligibility` | Real-time audit of student CGPA, branch, 10th/12th percentages, and active/dead backlogs. Instantly separates qualifying companies from disqualifying drives with exact refusal reasons — plus a **Marginal band** that flags borderline misses (within 0.5 CGPA or 5% academic marks, or backlog-only rejects) so students know which drives are within reach. |
 | **📄 Resume × JD Gap Analysis** | `/gap` | Built-in PDF/DOCX/TXT resume parser. Computes candidate match score %, identifies matched vs. missing technical skills, and generates actionable, step-by-step resume improvements. |
 | **🎯 Targeted Interview Coach** | `/interview` | Generates 70% technical + 30% behavioral interview questions tailored to specific job descriptions, accompanied by study hints and key concepts. |
-| **🏢 115 Drive Company Explorer** | `/companies` | Dense data grid and list explorer spanning the 2023-24 and 2025 placement batches. Filterable by CTC range, role, eligible branches, and search terms. |
+| **🏢 115 Drive Company Explorer** | `/companies` | Dense data grid and list explorer spanning the 2023-24 and 2025 placement batches. Filterable by batch, eligible branches, minimum CTC, and search terms, with CTC ascending/descending and name sorting plus pagination. Batch-wise drive counts and top recruiter stats are surfaced up top, and every drive opens a full detail page (`/companies/:id`) with role, CTC, eligibility, and process notes. |
 | **⚔️ Side-by-Side Company Compare** | `/compare` | Matrix comparison table evaluating 2 to 4 placement drives simultaneously with AI-generated comparative summary insights. |
 
 ---
@@ -82,6 +82,25 @@ graph TD
 - 🚫 **Prompt Injection Scanner**: Blocks adversarial overrides, system prompt extraction, and jailbreak attempts.
 - 🔑 **Log Credential Sanitization**: Regex-masks all API keys (`AQ.********************`) and database connection strings in server logs.
 - 🎯 **Strict Grounded Refusal**: Prevents off-topic answers or unverified compensation claims.
+
+---
+
+## 📡 API Reference (Key Endpoints)
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/health` | GET | Service status, model readiness, seed state |
+| `/api/chat` | POST | Grounded RAG Q&A (optional `stream: true` for SSE) |
+| `/api/companies` | GET | List with `q`, `batch`, `branch`, `min_ctc`, `sort` (`ctc_desc`/`ctc_asc`/`name_asc`), `page`, `page_size` |
+| `/api/companies/stats` | GET | Totals, avg/max CTC, `by_batch` breakdown, `top_recruiters`, `top_roles` |
+| `/api/companies/{id}` | GET | Full detail for one drive |
+| `/api/companies/compare` | POST | Compare 2–4 drives, AI comparative summary |
+| `/api/eligibility` | POST | Audit by CGPA/branch/10th-12th/backlogs/batch → `eligible` + `marginal` + `ineligible` lists |
+| `/api/gap-analysis` | POST | Resume × JD skill gap analysis |
+| `/api/interview-prep` | POST | Tailored technical + behavioral questions |
+| `/api/resume/parse` | POST | PDF/DOCX/TXT text extraction (rate limited) |
+
+AI-heavy endpoints are per-endpoint rate limited (chat 12, eligibility 20, compare/gap/interview 5, resume parse 10 per minute per IP), returning `429` with a `Retry-After` header.
 
 ---
 

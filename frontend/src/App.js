@@ -12,6 +12,52 @@ import InterviewPrep from "./pages/InterviewPrep";
 import Companies from "./pages/Companies";
 import Eligibility from "./pages/Eligibility";
 import Compare from "./pages/Compare";
+import CompanyDetail from "./pages/CompanyDetail";
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("ErrorBoundary caught:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          className="flex min-h-[60vh] items-center justify-center px-5 py-16"
+          data-testid="error-boundary"
+        >
+          <div className="sharp-card max-w-md p-8 text-center">
+            <div className="overline text-signal">SYSTEM FAULT</div>
+            <h1 className="mt-3 font-display text-3xl font-black tracking-tighter">
+              Something went wrong.
+            </h1>
+            <p className="mt-3 text-sm text-muted">
+              An unexpected error crashed this module. Your session is intact — reload to
+              continue.
+            </p>
+            <button
+              onClick={() => location.reload()}
+              className="btn-signal mt-6 justify-center"
+              data-testid="error-boundary-reload"
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const NAV = [
   { to: "/chat", label: "Ask" },
@@ -178,6 +224,7 @@ function AnimatedRoutes() {
         <Route path="/gap" element={<GapAnalysis />} />
         <Route path="/interview" element={<InterviewPrep />} />
         <Route path="/companies" element={<Companies />} />
+        <Route path="/companies/:id" element={<CompanyDetail />} />
         <Route path="/compare" element={<Compare />} />
       </Routes>
     </div>
@@ -191,7 +238,9 @@ export default function App() {
         <div className="flex min-h-screen flex-col bg-paper">
           <Nav />
           <main className="flex-1" data-testid="main-content">
-            <AnimatedRoutes />
+            <ErrorBoundary>
+              <AnimatedRoutes />
+            </ErrorBoundary>
           </main>
           <Footer />
           <Toaster position="top-right" richColors closeButton />
