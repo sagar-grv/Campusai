@@ -1,6 +1,6 @@
 # 🎓 Campus AI — Grounded Placement Intelligence Command Center
 
-> **A student-first, zero-hallucination placement companion powered by RAG, MongoDB hybrid search, and multi-tier LLM failover architecture.**
+> **A student-first, zero-hallucination placement companion powered by RAG, MongoDB hybrid search, multi-tier LLM failover architecture, and system-aware dark mode.**
 
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB.svg)
@@ -28,7 +28,7 @@ Designed around the **Swiss Brutalist / Performance Pro** aesthetic, Campus AI i
 
 ## ✨ Core Features & Platform Modules
 
-Campus AI is a **mobile-first** app (bottom tab navigation + floating AI assistant button) offering **6 interconnected placement tools**:
+Campus AI is a **mobile-first** app (bottom tab navigation + floating AI assistant button) offering **6 interconnected placement tools** and a **system-aware dark mode** toggle:
 
 | Tool | Route | Description |
 |---|---|---|
@@ -99,6 +99,8 @@ graph TD
 | `/api/eligibility` | POST | Audit by CGPA/branch/10th-12th/backlogs/batch → `eligible` + `marginal` + `ineligible` lists |
 
 AI-heavy endpoints are per-endpoint rate limited (chat 12, eligibility 20, compare/gap/interview 5, resume parse 10 per minute per IP), returning `429` with a `Retry-After` header.
+
+The UI follows the system theme by default and persists a manual light/dark override in the header toggle.
 
 ---
 

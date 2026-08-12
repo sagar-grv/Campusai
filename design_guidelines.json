@@ -59,7 +59,7 @@
     ]
   },
   "layouts": {
-    "philosophy": "Expose the skeleton. Data tables and gap analysis use 'Grid Borders' (technical look).",
+    "philosophy": "Expose the skeleton. Data tables and dashboard widgets use 'Grid Borders' (technical look).",
     "dashboard_grid": "Bento Grid structure with sharp 1px borders. Use pure rectangular cards (rounded-none or max rounded-sm). Grid items must use border-r border-b to expose the skeleton.",
     "spacing": "Generous internal padding (p-6, p-8) to prevent text collision with borders. Tight gaps (gap-4) for dashboard widgets.",
     "mobile_first": true,
@@ -79,8 +79,10 @@
     "cards": "Cardless or flat with 1px border. No soft shadows. Use hard offset shadows for interactive elements, or stick to pure minimal borders.",
     "inputs": "Flat, 1px border, white background. Focus ring: 2px solid #FF4D00. Use Shadcn customized for sharp edges.",
     "chatbot": "Editorial flow. RAG citations should appear as small mono-spaced tags. System responses: Light grey bg. User messages: Black bg with white text.",
-    "gap_analysis": "Use data tables with strict grids. Missing skills highlighted in warning/brand color. Matched skills in subdued success green.",
-    "company_explorer": "List or dense grid view. High density, scannable data."
+    "dashboard": "Live stats cards and charts with crisp borders, high contrast, and compact labels.",
+    "company_explorer": "List or dense grid view. High density, scannable data.",
+    "chat": "Editorial flow. RAG citations should appear as small mono-spaced tags. System responses: Light grey bg. User messages: Black bg with white text.",
+    "eligibility": "Use data tables with strict grids. Borderline cases should be visually distinct but not noisy."
   },
   "motion": {
     "hover": "Hover states must explicitly set colors (e.g. hover:bg-black hover:text-white).",
@@ -92,12 +94,12 @@
     "images": [
       {
         "url": "https://images.unsplash.com/photo-1637589308599-3478cc55510d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwyfHxpbmRpYW4lMjBjb2xsZWdlJTIwc3R1ZGVudCUyMGxhcHRvcHxlbnwwfHx8fDE3ODY0MzkzMzl8MA&ixlib=rb-4.1.0&q=85",
-        "description": "Indian college student with laptop - Use for Landing/Welcome page hero",
+        "description": "Indian college student with laptop - Use for Dashboard/Welcome page hero",
         "category": "hero"
       },
       {
         "url": "https://images.unsplash.com/photo-1758691737278-3af15b37af48?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwzfHxqb2IlMjBpbnRlcnZpZXclMjBtb2Rlcm4lMjBvZmZpY2V8ZW58MHx8fHwxNzg2NDM5MzM5fDA&ixlib=rb-4.1.0&q=85",
-        "description": "Two colleagues discussing work in modern office - Use for Interview Prep section or Gap Analysis empty state",
+        "description": "Two colleagues discussing work in modern office - Use for chat, compare, or empty-state illustrative sections",
         "category": "feature"
       }
     ],
@@ -109,13 +111,13 @@
     "focus": "Focus states must have HIGHER contrast than default state."
   },
   "3d_libraries": {
-    "usage": "Not recommended for this specific problem statement as the focus is on data density, gap analysis, and fast productivity. If complex visualization is needed, strictly prefer pure Recharts or D3.js (2D)."
+    "usage": "Not recommended for this specific problem statement as the focus is on data density, dashboard visualization, and fast productivity. If complex visualization is needed, strictly prefer pure Recharts or D3.js (2D)."
   },
   "instructions_to_main_agent": [
     "You have .js files not .tsx files. Write React components using plain .jsx/.js syntax.",
     "Build a clean, professional, high-contrast UI (black, white, off-white, and bright terracotta accent).",
     "Avoid standard Vercel/Stripe looking cards. Expose grid borders (use border-collapse strategies or simple 1px grid lines).",
-    "The Gap Analysis should look like a serious data report or terminal, not a playful toy.",
+    "The Dashboard should feel like a serious command center, not a playful toy.",
     "For the chatbot, RAG capabilities mean citing sources clearly below the answers using small, distinct tags.",
     "Use Recharts with sharp, flat styling if charts are needed. No gradients in charts.",
     "In the Chatbot interface, ensure 'I don't know' logic acts gracefully.",
