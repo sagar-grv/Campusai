@@ -272,6 +272,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Campus AI", lifespan=lifespan)
+handler = app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in CORS.split(",")] if CORS != "*" else ["*"],
