@@ -232,7 +232,10 @@ async def seed_placement_data():
 async def ensure_initialized():
     global mongo, db, gemini
     if gemini is None:
-        gemini = GeminiClient()
+        try:
+            gemini = GeminiClient()
+        except Exception as e:
+            print(f"[gemini] init error: {e}")
     if db is None or mongo is None:
         try:
             real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=1000)
@@ -241,13 +244,18 @@ async def ensure_initialized():
             print("[db] Connected to real MongoDB instance.")
         except Exception as e:
             print(f"[db] Real MongoDB unavailable ({e}), using in-memory mongomock_motor client.")
-            from mongomock_motor import AsyncMongoMockClient
-            mongo = AsyncMongoMockClient()
-        db = mongo[DB_NAME]
-        try:
-            await seed_placement_data()
-        except Exception as e:
-            print(f"[seed] Seeding exception: {e}")
+            try:
+                from mongomock_motor import AsyncMongoMockClient
+                mongo = AsyncMongoMockClient()
+            except Exception as e2:
+                print(f"[db] mongomock_motor fallback error: {e2}")
+                mongo = None
+        if mongo:
+            db = mongo[DB_NAME]
+            try:
+                await seed_placement_data()
+            except Exception as e:
+                print(f"[seed] Seeding exception: {e}")
 
 
 # ---------- lifespan ----------
@@ -256,7 +264,10 @@ async def lifespan(app: FastAPI):
     await ensure_initialized()
     yield
     if mongo:
-        mongo.close()
+        try:
+            mongo.close()
+        except Exception:
+            pass
 
 
 
@@ -276,15 +287,21 @@ async def health():
     await ensure_initialized()
     ok = True
     try:
-        await mongo.admin.command("ping")
+        if mongo and hasattr(mongo, "admin"):
+            await mongo.admin.command("ping")
     except Exception:
         ok = False
-    seed = await db.meta.find_one({"_id": "placement_seed"})
+    seed = None
+    if db is not None:
+        try:
+            seed = await db.meta.find_one({"_id": "placement_seed"})
+        except Exception:
+            pass
     return {
         "ok": ok,
         "chat_model": os.environ.get("CHAT_MODEL", "gemini-2.5-flash"),
         "embed_model": os.environ.get("EMBED_MODEL", "gemini-embedding-001"),
-        "gemini_ready": gemini is not None and gemini.ready,
+        "gemini_ready": gemini is not None and (gemini.ready or bool(os.environ.get("NVIDIA_API_KEY"))),
         "companies_seeded": bool(seed),
     }
 
