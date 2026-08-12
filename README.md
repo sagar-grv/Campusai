@@ -1,0 +1,142 @@
+# 🎓 Campus AI — Grounded Placement Intelligence Command Center
+
+> **A student-first, zero-hallucination placement companion powered by RAG, MongoDB hybrid search, and multi-tier LLM failover architecture.**
+
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)
+![React](https://img.shields.io/badge/React-18.3-61DAFB.svg)
+![Vercel](https://img.shields.io/badge/Deploy-Vercel-000000.svg)
+![MongoDB](https://img.shields.io/badge/Database-MongoDB-47A248.svg)
+
+---
+
+## 📖 The Story Behind Campus AI
+
+Every year, millions of graduating engineering students face the high-stakes pressure of campus placement season. But instead of focusing on technical preparation, students find themselves buried under:
+
+* 📄 **Opaque PDF brochures** with conflicting eligibility criteria.
+* ❓ **Unclear CGPA cutoffs** and hidden active/dead backlog restrictions.
+* 💸 **Confusing compensation breakdowns** (Fixed vs. Performance Bonus vs. ESOPs).
+* 🚨 **Generic AI Hallucinations**: Standard LLMs routinely invent fake salaries or misquote branch eligibility rules when asked placement queries.
+
+**Campus AI** was built to solve this exact problem. 
+
+Designed around the **Swiss Brutalist / Performance Pro** aesthetic, Campus AI is an enterprise-grade placement intelligence platform that ingests raw placement brochures, normalizes 115+ company drives across batches, and provides **100% grounded answers backed by source citations (`[Doc N]`)**. If a fact is not in the verified placement dataset, Campus AI explicitly declines to guess.
+
+---
+
+## ✨ Core Features & Platform Modules
+
+Campus AI offers **6 interconnected placement tools**:
+
+| Tool | Route | Description |
+|---|---|---|
+| **💬 Placement Assistant (RAG Chat)** | `/chat` | Grounded Q&A over 115 company placement drives. Combines MongoDB structured filters with 768-dim vector embeddings and displays interactive company cards alongside source citations. |
+| **🎓 Personalized Eligibility Auditor** | `/eligibility` | Real-time audit of student CGPA, branch, 10th/12th percentages, and active/dead backlogs. Instantly separates qualifying companies from disqualifying drives with exact refusal reasons. |
+| **📄 Resume × JD Gap Analysis** | `/gap` | Built-in PDF/DOCX/TXT resume parser. Computes candidate match score %, identifies matched vs. missing technical skills, and generates actionable, step-by-step resume improvements. |
+| **🎯 Targeted Interview Coach** | `/interview` | Generates 70% technical + 30% behavioral interview questions tailored to specific job descriptions, accompanied by study hints and key concepts. |
+| **🏢 115 Drive Company Explorer** | `/companies` | Dense data grid and list explorer spanning the 2023-24 and 2025 placement batches. Filterable by CTC range, role, eligible branches, and search terms. |
+| **⚔️ Side-by-Side Company Compare** | `/compare` | Matrix comparison table evaluating 2 to 4 placement drives simultaneously with AI-generated comparative summary insights. |
+
+---
+
+## 🏗️ System Architecture & Failover Engine
+
+```mermaid
+graph TD
+    User([Student / User]) --> Frontend[React 18 + TailwindCSS Frontend]
+    Frontend --> API[FastAPI Backend / Vercel Serverless]
+    
+    subgraph Security Layer
+        API --> RateLimiter[Sliding Window Rate Limiter 25 req/min]
+        API --> Guardrails[Prompt Injection Scanner & Key Masking]
+    end
+    
+    subgraph Data & Search Engine
+        Guardrails --> HybridSearch[Hybrid Retrieval Engine]
+        HybridSearch --> Mongo[(MongoDB / mongomock)]
+        HybridSearch --> VectorDB[768-Dim Vector Chunk Cache]
+    end
+    
+    subgraph Multi-Tier AI Inference Chain
+        HybridSearch --> Tier1[Primary: Google Gemini 2.5 Flash]
+        Tier1 -- Quota / Rate Limit 429 --> Tier2[Fallback: NVIDIA Llama 3.1 8B NIM API]
+    end
+    
+    Tier1 --> Response[Grounded Markdown Response + UI Cards]
+    Tier2 --> Response
+    Response --> Frontend
+```
+
+### ⚡ Resilient AI Failover Chain
+1. **Tier 1 (Primary)**: `Google Gemini 2.5 Flash` (High speed, structured instruction following).
+2. **Tier 2 (Fallback A)**: `Gemini 1.5 Flash` / `Gemini 1.5 Pro`.
+3. **Tier 3 (Fallback B - Fail-Safe)**: `NVIDIA Llama 3.1 8B NIM API` (`https://integrate.api.nvidia.com/v1/chat/completions`). Resolves in **< 0.7s** if Gemini free-tier quotas are exhausted.
+
+---
+
+## 🔒 Security & Anti-Hallucination Guardrails
+
+- 🛡️ **Sliding Window Rate Limiting**: 25 requests/minute per client IP to prevent API key abuse.
+- 🚫 **Prompt Injection Scanner**: Blocks adversarial overrides, system prompt extraction, and jailbreak attempts.
+- 🔑 **Log Credential Sanitization**: Regex-masks all API keys (`AQ.********************`) and database connection strings in server logs.
+- 🎯 **Strict Grounded Refusal**: Prevents off-topic answers or unverified compensation claims.
+
+---
+
+## 🚀 Deployment Guide (Vercel + GitHub)
+
+Campus AI is pre-configured for 1-click serverless deployment on **Vercel**.
+
+### 1. Vercel Environment Variables
+In your Vercel Project Settings, add the following environment variables:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key
+NVIDIA_API_KEY=your_nvidia_api_key
+NVIDIA_MODEL=meta/llama-3.1-8b-instruct
+DB_NAME=campus_ai
+MONGO_URL=your_mongodb_connection_uri
+```
+
+### 2. Deployment Settings
+- **Framework Preset**: `Other`
+- **Root Directory**: `./`
+- **Build & Output**: Handled automatically by `vercel.json`.
+
+---
+
+## 💻 Local Development Setup
+
+### 1. Prerequisites
+- Python 3.11+
+- Node.js 18+
+
+### 2. Backend Setup
+```bash
+cd backend
+python -m venv venv
+# On Windows:
+.\venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
+
+pip install -r requirements.txt
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+### 3. Frontend Setup
+```bash
+cd frontend
+npm install
+npm start
+```
+
+Access the application at `http://localhost:3000`.
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.

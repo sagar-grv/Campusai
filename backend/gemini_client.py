@@ -174,7 +174,7 @@ class GeminiClient:
 
         # NVIDIA API Fallback
         nv_key = os.environ.get("NVIDIA_API_KEY", "").strip()
-        nv_model = os.environ.get("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct").strip()
+        nv_model = os.environ.get("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct").strip()
         if nv_key:
             try:
                 import urllib.request

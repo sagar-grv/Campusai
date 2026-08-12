@@ -250,7 +250,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    asyncio.create_task(seed_placement_data())
+    try:
+        await seed_placement_data()
+    except Exception as e:
+        print(f"[seed] Seeding exception: {e}")
     yield
     mongo.close()
 
