@@ -38,6 +38,7 @@ export default function Companies() {
   const [pageSize, setPageSize] = React.useState(25);
   const [page, setPage] = React.useState(1);
   const [total, setTotal] = React.useState(0);
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   const queryRef = React.useRef("");
   const filterRef = React.useRef({ batch: "", branch: "", minCtc: "", sort: "", pageSize: 25 });
@@ -86,6 +87,10 @@ export default function Companies() {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const activeFilterCount =
+    [filterRef.current.batch, filterRef.current.branch, filterRef.current.minCtc, filterRef.current.sort].filter(Boolean)
+      .length + (filterRef.current.pageSize !== 25 ? 1 : 0);
 
   function handlePageSize(val) {
     const size = Number(val);
@@ -141,14 +146,14 @@ export default function Companies() {
             />
           </div>
           {(stats.by_batch?.length > 0 || stats.top_recruiters?.length > 0) && (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div className="border border-line bg-white px-5 py-4" data-testid="company-stats-batches">
+            <div className="mt-3 grid min-w-0 gap-3 md:grid-cols-2">
+              <div className="min-w-0 border border-line bg-white px-5 py-4" data-testid="company-stats-batches">
                 <div className="overline mb-3">DRIVES BY BATCH</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="chip-scroll flex gap-2 overflow-x-auto md:flex-wrap">
                   {stats.by_batch.map((b) => (
                     <span
                       key={b.batch}
-                      className="border border-line bg-paper px-3 py-1.5 font-mono text-xs"
+                      className="shrink-0 border border-line bg-paper px-3 py-1.5 font-mono text-xs"
                     >
                       <span className="font-bold text-ink">{b.batch}</span>
                       <span className="text-muted"> · {b.count}</span>
@@ -156,13 +161,13 @@ export default function Companies() {
                   ))}
                 </div>
               </div>
-              <div className="border border-line bg-white px-5 py-4" data-testid="company-stats-recruiters">
+              <div className="min-w-0 border border-line bg-white px-5 py-4" data-testid="company-stats-recruiters">
                 <div className="overline mb-3">TOP RECRUITERS</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="chip-scroll flex gap-2 overflow-x-auto md:flex-wrap">
                   {stats.top_recruiters.slice(0, 6).map((r) => (
                     <span
                       key={r.company}
-                      className="border border-line bg-paper px-3 py-1.5 font-mono text-xs"
+                      className="shrink-0 border border-line bg-paper px-3 py-1.5 font-mono text-xs"
                     >
                       <span className="font-bold text-ink">{r.company}</span>
                       <span className="text-muted"> · {r.count}</span>
@@ -175,92 +180,77 @@ export default function Companies() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters (mobile) */}
+      <div className="mb-3 md:hidden">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          aria-expanded={filtersOpen}
+          className="btn-outline w-full justify-between text-sm"
+          data-testid="filter-toggle"
+        >
+          <span>Filter</span>
+          <span className="flex items-center gap-2">
+            {activeFilterCount > 0 && (
+              <span
+                className="font-mono text-xs text-signal"
+                data-testid="filter-count"
+              >
+                ({activeFilterCount})
+              </span>
+            )}
+            {filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        </button>
+        {filtersOpen && (
+          <div
+            className="mt-3 flex flex-col gap-3 border border-line bg-white p-3"
+            data-testid="filter-panel-mobile"
+          >
+            <FilterControls
+              batch={batch}
+              setBatch={setBatch}
+              branch={branch}
+              setBranch={setBranch}
+              minCtc={minCtc}
+              setMinCtc={setMinCtc}
+              sort={sort}
+              setSort={setSort}
+              pageSize={pageSize}
+              setPageSize={setPageSize}
+              handleFilterChange={handleFilterChange}
+              handlePageSize={handlePageSize}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Filters (desktop) */}
       <div
-        className="mb-3 grid gap-3 border border-line bg-white p-3 md:grid-cols-5"
+        className="mb-3 hidden grid gap-3 border border-line bg-white p-3 md:grid md:grid-cols-5"
         data-testid="company-filters"
       >
-        <label className="flex flex-col gap-1">
-          <span className="overline">BATCH</span>
-          <select
-            value={batch}
-            onChange={(e) => handleFilterChange(setBatch, "batch", e.target.value)}
-            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
-            data-testid="filter-batch"
-          >
-            <option value="">All</option>
-            {BATCHES.filter(Boolean).map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="overline">BRANCH</span>
-          <select
-            value={branch}
-            onChange={(e) => handleFilterChange(setBranch, "branch", e.target.value)}
-            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
-            data-testid="filter-branch"
-          >
-            {BRANCHES.map((b) => (
-              <option key={b || "all"} value={b}>
-                {b || "All"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="overline">MIN CTC (LPA)</span>
-          <input
-            type="number"
-            min={0}
-            step={0.5}
-            value={minCtc}
-            onChange={(e) => handleFilterChange(setMinCtc, "minCtc", e.target.value)}
-            placeholder="Min CTC (LPA)"
-            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none placeholder:text-subtle focus:border-signal"
-            data-testid="filter-min-ctc"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="overline">SORT</span>
-          <select
-            value={sort}
-            onChange={(e) => handleFilterChange(setSort, "sort", e.target.value)}
-            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
-            data-testid="filter-sort"
-          >
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="overline">PER PAGE</span>
-          <select
-            value={pageSize}
-            onChange={(e) => handlePageSize(e.target.value)}
-            className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
-            data-testid="filter-page-size"
-          >
-            {PAGE_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FilterControls
+          batch={batch}
+          setBatch={setBatch}
+          branch={branch}
+          setBranch={setBranch}
+          minCtc={minCtc}
+          setMinCtc={setMinCtc}
+          sort={sort}
+          setSort={setSort}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          handleFilterChange={handleFilterChange}
+          handlePageSize={handlePageSize}
+        />
       </div>
 
       {/* Search */}
       <div className="sharp-card mb-6 flex items-center gap-3 px-4 py-3">
         <Search size={18} className="text-muted" strokeWidth={1.5} />
         <input
-          className="w-full bg-transparent text-sm outline-none placeholder:text-subtle"
+          className="w-full bg-transparent text-base outline-none placeholder:text-subtle md:text-sm"
           placeholder="Search companies, roles, branches, eligibility..."
           value={query}
           onChange={(e) => handleSearch(e.target.value)}
@@ -335,7 +325,7 @@ export default function Companies() {
                   data-testid={`company-row-${i}`}
                 >
                   <div
-                    className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-paper md:grid md:grid-cols-12"
+                    className="flex min-h-[56px] w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-paper md:grid md:grid-cols-12"
                     onClick={() => setExpanded(isOpen ? null : i)}
                   >
                     <Link
@@ -350,7 +340,7 @@ export default function Companies() {
                         strokeWidth={1.5}
                       />
                       <span>{c.company || "—"}</span>
-                      <span className="font-mono text-[10px] uppercase tracking-widerX text-subtle transition-colors group-hover:text-signal">
+                      <span className="hidden font-mono text-[10px] uppercase tracking-widerX text-subtle transition-colors group-hover:text-signal md:inline">
                         Details →
                       </span>
                     </Link>
@@ -363,8 +353,8 @@ export default function Companies() {
                     <span className="col-span-2 hidden font-mono text-xs text-muted md:block">
                       {(c.branches || "—").slice(0, 30)}
                     </span>
-                    <span className="col-span-2 flex items-center justify-between">
-                      <span className="font-mono text-xs text-subtle">
+                    <span className="col-span-2 ml-auto flex items-center gap-2 md:ml-0 md:justify-between">
+                      <span className="hidden font-mono text-xs text-subtle md:block">
                         {c.batch || c.source_file?.includes("2025") ? "2025" : "2023-24"}
                       </span>
                       <button
@@ -474,11 +464,12 @@ export default function Companies() {
               data-testid="company-pagination"
             >
               <span className="font-mono text-[10px] uppercase tracking-widerX text-muted">
-                Page {page} of {totalPages} · {total} results
+                Page {page} of {totalPages}
+                <span className="hidden sm:inline"> · {total} results</span>
               </span>
               <div className="flex gap-2">
                 <button
-                  className="btn-outline !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
+                  className="btn-outline min-h-[44px] !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
                   disabled={page <= 1}
                   onClick={() => applyFilters(page - 1)}
                   data-testid="pagination-prev"
@@ -486,7 +477,7 @@ export default function Companies() {
                   ← Prev
                 </button>
                 <button
-                  className="btn-outline !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
+                  className="btn-outline min-h-[44px] !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
                   disabled={page >= totalPages}
                   onClick={() => applyFilters(page + 1)}
                   data-testid="pagination-next"
@@ -499,6 +490,100 @@ export default function Companies() {
         </div>
       )}
     </div>
+  );
+}
+
+function FilterControls({
+  batch,
+  setBatch,
+  branch,
+  setBranch,
+  minCtc,
+  setMinCtc,
+  sort,
+  setSort,
+  pageSize,
+  setPageSize,
+  handleFilterChange,
+  handlePageSize,
+}) {
+  return (
+    <>
+      <label className="flex flex-col gap-1">
+        <span className="overline">BATCH</span>
+        <select
+          value={batch}
+          onChange={(e) => handleFilterChange(setBatch, "batch", e.target.value)}
+          className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+          data-testid="filter-batch"
+        >
+          <option value="">All</option>
+          {BATCHES.filter(Boolean).map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="overline">BRANCH</span>
+        <select
+          value={branch}
+          onChange={(e) => handleFilterChange(setBranch, "branch", e.target.value)}
+          className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+          data-testid="filter-branch"
+        >
+          {BRANCHES.map((b) => (
+            <option key={b || "all"} value={b}>
+              {b || "All"}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="overline">MIN CTC (LPA)</span>
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          value={minCtc}
+          onChange={(e) => handleFilterChange(setMinCtc, "minCtc", e.target.value)}
+          placeholder="Min CTC (LPA)"
+          className="w-full border border-line bg-paper p-2 font-mono text-base outline-none placeholder:text-subtle focus:border-signal md:text-sm"
+          data-testid="filter-min-ctc"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="overline">SORT</span>
+        <select
+          value={sort}
+          onChange={(e) => handleFilterChange(setSort, "sort", e.target.value)}
+          className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+          data-testid="filter-sort"
+        >
+          {SORTS.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="overline">PER PAGE</span>
+        <select
+          value={pageSize}
+          onChange={(e) => handlePageSize(e.target.value)}
+          className="w-full border border-line bg-paper p-2 font-mono text-xs outline-none focus:border-signal"
+          data-testid="filter-page-size"
+        >
+          {PAGE_SIZES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
   );
 }
 

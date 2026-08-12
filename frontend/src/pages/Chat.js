@@ -1,6 +1,6 @@
 import React from "react";
 import { toast } from "sonner";
-import { Send, Sparkles, RotateCw, MessageSquare } from "lucide-react";
+import { Send, Sparkles, RotateCw, MessageSquare, ChevronDown } from "lucide-react";
 import { motion } from "motion/react";
 import { chatAsk, streamChat } from "../lib/api";
 import FormattedMarkdown from "../components/FormattedMarkdown";
@@ -135,21 +135,25 @@ export default function Chat() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-8 md:px-10 md:py-12" data-testid="chat-page">
-      <div className="mb-6 flex items-end justify-between">
-        <div>
+    <div
+      className="mx-auto flex h-[calc(100dvh-64px)] w-full max-w-[1400px] flex-col px-4 pb-4 pt-4 md:h-auto md:px-10 md:py-12"
+      data-testid="chat-page"
+    >
+      {/* compact page header */}
+      <div className="mb-4 flex shrink-0 items-center justify-between gap-3 md:mb-6 md:items-end">
+        <div className="min-w-0">
           <div className="overline">MODULE / 01 · PLACEMENT ASSISTANT</div>
-          <h1 className="mt-2 font-display text-4xl font-black tracking-tighter md:text-6xl">
+          <h1 className="mt-1 font-display text-2xl font-black tracking-tighter md:mt-2 md:text-6xl">
             Ask the database.
           </h1>
-          <p className="mt-3 max-w-xl text-muted">
+          <p className="mt-1 hidden max-w-xl text-sm text-muted md:mt-3 md:block">
             Grounded on your college's real placement records. Every answer cites its source
             document. If it's not in the DB, it will say so.
           </p>
         </div>
         {messages.length > 0 && (
           <button
-            className="btn-outline !py-2 !px-4 text-sm"
+            className="btn-outline shrink-0 !py-2 !px-4 text-sm"
             onClick={() => {
               setMessages([]);
               setSessionId(null);
@@ -161,32 +165,32 @@ export default function Chat() {
         )}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-12">
+      <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-12 md:gap-6">
         {/* main chat area */}
-        <div className="md:col-span-8">
+        <div className="flex min-h-0 flex-col md:col-span-8">
           <div
-            className="sharp-card min-h-[420px] overflow-hidden"
+            className="sharp-card flex min-h-0 flex-1 flex-col overflow-hidden md:min-h-[420px]"
             data-testid="chat-window"
           >
-            <div className="flex items-center justify-between border-b border-line bg-paper px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-line bg-paper px-4 py-2 md:py-3">
               <div className="flex items-center gap-2">
                 <MessageSquare size={16} className="text-signal" strokeWidth={1.5} />
                 <span className="font-mono text-xs uppercase tracking-widerX">SESSION</span>
               </div>
-              <span className="font-mono text-[10px] text-subtle">
+              <span className="hidden font-mono text-[10px] text-subtle md:block">
                 {sessionId ? sessionId.slice(0, 8) : "—"}
               </span>
             </div>
 
-            <div className="max-h-[60vh] space-y-4 overflow-y-auto p-4 md:p-6">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 md:max-h-[60vh] md:p-6">
               {messages.length === 0 && (
-                <div className="pt-10 text-center" data-testid="chat-empty">
+                <div className="mx-auto max-w-sm pt-8 text-center md:pt-10" data-testid="chat-empty">
                   <Sparkles className="mx-auto text-signal" size={28} strokeWidth={1.5} />
                   <p className="mt-3 font-display text-2xl font-black tracking-tighter">
                     Start with a real question.
                   </p>
                   <p className="mt-1 text-sm text-muted">
-                    Pick a suggestion on the right, or ask your own.
+                    Pick a suggestion below, or ask your own.
                   </p>
                 </div>
               )}
@@ -208,8 +212,27 @@ export default function Chat() {
               <div ref={bottomRef} />
             </div>
 
+            {/* mobile quick-reply suggestion chips */}
+            <div
+              className="chip-scroll flex shrink-0 gap-2 overflow-x-auto border-t border-line px-3 py-3 md:hidden"
+              data-testid="chat-suggestions-mobile"
+            >
+              {SUGGESTIONS.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => send(s)}
+                  disabled={loading}
+                  className="shrink-0 border border-line bg-paper px-3 py-2 text-left text-xs text-muted transition-colors hover:border-ink hover:text-ink disabled:opacity-50"
+                  data-testid={`suggestion-${i}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
+            {/* composer */}
             <form
-              className="flex items-center gap-2 border-t border-line p-3"
+              className="flex shrink-0 items-center gap-2 border-t border-line p-3"
               onSubmit={(e) => {
                 e.preventDefault();
                 send();
@@ -219,24 +242,25 @@ export default function Chat() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask about a company, role, eligibility..."
-                className="w-full rounded-none border border-line px-3 py-3 outline-none focus:border-signal focus:ring-0"
+                className="min-h-11 w-full min-w-0 flex-1 rounded-none border border-line px-3 py-3 outline-none focus:border-signal focus:ring-0"
                 data-testid="chat-input"
                 disabled={loading}
               />
               <button
                 type="submit"
-                className="btn-signal !py-3 !px-4"
+                aria-label="Send"
+                className="btn-signal !h-11 !w-11 shrink-0 justify-center !p-0"
                 disabled={loading || !input.trim()}
                 data-testid="chat-send"
               >
-                <Send size={16} />
+                <Send size={18} />
               </button>
             </form>
           </div>
         </div>
 
-        {/* sidebar suggestions */}
-        <aside className="md:col-span-4" data-testid="chat-suggestions">
+        {/* sidebar suggestions (desktop only) */}
+        <aside className="hidden md:col-span-4 md:block" data-testid="chat-suggestions">
           <div className="sharp-card p-5">
             <div className="overline mb-4">TRY THESE</div>
             <Stagger className="grid gap-2" animate gap={0.05} delay={0.1}>
@@ -272,17 +296,18 @@ export default function Chat() {
 
 function Bubble({ m, index }) {
   const isUser = m.role === "user";
+  const [sourcesOpen, setSourcesOpen] = React.useState(true);
   return (
     <motion.div
       key={index}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: EASE }}
-      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+      className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}
     >
       <div
-        className={`max-w-[85%] p-4 text-sm leading-relaxed md:text-[15px] ${
-          isUser ? "bubble-user" : "bubble-ai"
+        className={`min-w-0 max-w-[85%] p-3 text-sm leading-relaxed [overflow-wrap:anywhere] md:p-4 md:text-[15px] ${
+          isUser ? "bubble-user ml-auto" : "bubble-ai"
         }`}
         data-testid={isUser ? "message-user" : "message-ai"}
       >
@@ -293,17 +318,15 @@ function Bubble({ m, index }) {
 
         {/* Structured Company Cards */}
         {!isUser && m.matched_companies && m.matched_companies.length > 0 && (
-          <div className="mt-4 border-t border-line pt-3 grid gap-3">
+          <div className="mt-3 grid gap-2 border-t border-line pt-3 md:gap-3">
             <div className="overline">MATCHED COMPANIES</div>
-            <Stagger className="grid gap-3" animate gap={0.06}>
+            <Stagger className="grid gap-2 md:gap-3" animate gap={0.06}>
               {m.matched_companies.map((c, i) => (
                 <StaggerItem key={i}>
-                  <div
-                    className="border border-line bg-paper p-3 font-body text-xs text-ink shadow-sm"
-                  >
-                    <div className="flex items-center justify-between font-bold text-sm">
-                      <span>{c.company}</span>
-                      <span className="font-mono text-signal">{c.ctc || "—"}</span>
+                  <div className="border border-line bg-paper p-2.5 font-body text-xs text-ink shadow-sm md:p-3">
+                    <div className="flex min-w-0 items-center justify-between gap-2 text-sm font-bold">
+                      <span className="min-w-0 truncate">{c.company}</span>
+                      <span className="shrink-0 font-mono text-signal">{c.ctc || "—"}</span>
                     </div>
                     <div className="mt-1 text-muted">Role: {c.role || "N/A"}</div>
                     <div className="mt-1 font-mono text-[11px] text-subtle">
@@ -319,19 +342,34 @@ function Bubble({ m, index }) {
         {/* Source Citations */}
         {m.sources && m.sources.length > 0 && (
           <div className="mt-3 border-t border-line pt-3">
-            <div className="overline mb-2">SOURCES</div>
-            <Stagger className="flex flex-wrap gap-2" animate gap={0.04}>
-              {m.sources.map((s, i) => (
-                <StaggerItem key={i}>
-                  <span
-                    className="block border border-line bg-paper px-2 py-1 font-mono text-[10px] uppercase tracking-widerX text-muted"
-                    data-testid={`source-tag-${i}`}
-                  >
-                    {s.company || "doc"} · {s.score}
-                  </span>
-                </StaggerItem>
-              ))}
-            </Stagger>
+            <button
+              type="button"
+              onClick={() => setSourcesOpen((v) => !v)}
+              aria-expanded={sourcesOpen}
+              className="overline mb-2 flex items-center gap-1 transition-colors hover:text-ink"
+              data-testid="chat-sources-toggle"
+            >
+              SOURCES ({m.sources.length})
+              <ChevronDown
+                size={12}
+                strokeWidth={2}
+                className={`transition-transform ${sourcesOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {sourcesOpen && (
+              <Stagger className="flex flex-wrap gap-2" animate gap={0.04}>
+                {m.sources.map((s, i) => (
+                  <StaggerItem key={i}>
+                    <span
+                      className="block max-w-[180px] truncate border border-line bg-paper px-1.5 py-1 font-mono text-[10px] uppercase tracking-widerX text-muted md:max-w-[220px] md:px-2"
+                      data-testid={`source-tag-${i}`}
+                    >
+                      {s.company || "doc"} · {s.score}
+                    </span>
+                  </StaggerItem>
+                ))}
+              </Stagger>
+            )}
           </div>
         )}
       </div>

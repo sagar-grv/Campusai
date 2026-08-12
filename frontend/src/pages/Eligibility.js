@@ -87,7 +87,7 @@ export default function Eligibility() {
 
       <div className="grid gap-6 md:grid-cols-12">
         {/* LEFT – Inputs Form */}
-        <div className="md:col-span-4">
+        <div className="min-w-0 md:col-span-4">
           <form onSubmit={handleCheck} className="space-y-4">
             <div className="sharp-card p-5">
               <div className="overline mb-3">BRANCH & BATCH</div>
@@ -125,7 +125,7 @@ export default function Eligibility() {
 
             <div className="sharp-card p-5">
               <div className="overline mb-3">CURRENT CGPA</div>
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-3">
                 <input
                   type="range"
                   min={2.0}
@@ -133,7 +133,7 @@ export default function Eligibility() {
                   step={0.1}
                   value={cgpa}
                   onChange={(e) => setCgpa(e.target.value)}
-                  className="flex-1 accent-signal"
+                  className="min-w-0 flex-1 accent-signal"
                   data-testid="eligibility-cgpa-slider"
                 />
                 <span className="font-mono text-base font-bold text-ink">
@@ -208,7 +208,7 @@ export default function Eligibility() {
         </div>
 
         {/* RIGHT – Results Dashboard */}
-        <div className="md:col-span-8" data-testid="eligibility-results">
+        <div className="min-w-0 md:col-span-8" data-testid="eligibility-results">
           {result && (
             <div className="space-y-5 fade-up">
               {/* Summary Metrics */}

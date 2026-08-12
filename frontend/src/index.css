@@ -204,3 +204,38 @@ a:focus-visible, button:focus-visible {
   .typing-dot { animation: none; opacity: 1; }
   .skel { animation: none; }
 }
+
+/* ---------- Mobile app shell ---------- */
+
+/* Bottom tab bar + floating action button (mobile only) */
+.tabbar-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.fab-shadow {
+  box-shadow: 0 8px 24px rgba(10, 10, 10, 0.28);
+}
+
+/* Recharts container — never overflow horizontally on mobile */
+.chart-shell {
+  width: 100%;
+  min-width: 0;
+}
+.chart-shell .recharts-surface {
+  overflow: visible;
+}
+
+/* Hide scrollbars on horizontal chip rows but keep scrollability */
+.chip-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.chip-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .mobile-only { display: none !important; }
+}
+@media (max-width: 767.98px) {
+  .desktop-only { display: none !important; }
+}

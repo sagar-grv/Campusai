@@ -1,14 +1,18 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, NavLink, Link, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
-import { Menu, X } from "lucide-react";
-import { MotionConfig, motion, AnimatePresence, LayoutGroup } from "motion/react";
+import {
+  Home,
+  MessageSquare,
+  Building2,
+  GraduationCap,
+  ArrowLeftRight,
+} from "lucide-react";
+import { MotionConfig, motion, LayoutGroup } from "motion/react";
 import { EASE } from "./components/motion";
 
-import Landing from "./pages/Landing";
+import Dashboard from "./pages/Dashboard";
 import Chat from "./pages/Chat";
-import GapAnalysis from "./pages/GapAnalysis";
-import InterviewPrep from "./pages/InterviewPrep";
 import Companies from "./pages/Companies";
 import Eligibility from "./pages/Eligibility";
 import Compare from "./pages/Compare";
@@ -60,19 +64,82 @@ class ErrorBoundary extends React.Component {
 }
 
 const NAV = [
+  { to: "/", label: "Dashboard" },
   { to: "/chat", label: "Ask" },
-  { to: "/eligibility", label: "Eligibility" },
-  { to: "/gap", label: "Gap Analysis" },
-  { to: "/interview", label: "Interview Prep" },
   { to: "/companies", label: "Companies" },
+  { to: "/eligibility", label: "Eligibility" },
   { to: "/compare", label: "Compare" },
 ];
 
-function Nav() {
-  const [open, setOpen] = React.useState(false);
-  const loc = useLocation();
-  React.useEffect(() => setOpen(false), [loc.pathname]);
+const TABS = [
+  { to: "/", label: "Home", icon: Home },
+  { to: "/chat", label: "Ask", icon: MessageSquare, primary: true },
+  { to: "/companies", label: "Companies", icon: Building2 },
+  { to: "/eligibility", label: "Eligibility", icon: GraduationCap },
+  { to: "/compare", label: "Compare", icon: ArrowLeftRight },
+];
 
+function BottomNav() {
+  const loc = useLocation();
+  return (
+    <nav
+      className="tabbar-safe fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur-xl md:hidden"
+      aria-label="mobile primary"
+      data-testid="bottom-nav"
+    >
+      <div className="flex">
+        {TABS.map((t) => {
+          const active = loc.pathname === t.to;
+          const Icon = t.icon;
+          return (
+            <NavLink
+              key={t.to}
+              to={t.to}
+              data-testid={`tab-${t.to.slice(1) || "home"}`}
+              className={`flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 ${
+                active ? "text-ink" : "text-subtle"
+              }`}
+            >
+              <Icon
+                size={20}
+                strokeWidth={1.75}
+                className={active ? "text-signal" : ""}
+              />
+              <span
+                className={`font-mono text-[9px] uppercase tracking-widerX ${
+                  active ? "font-bold" : ""
+                }`}
+              >
+                {t.label}
+              </span>
+            </NavLink>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function AskFab() {
+  const loc = useLocation();
+  const navigate = useNavigate();
+  if (loc.pathname === "/chat") return null;
+  return (
+    <motion.button
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3, ease: EASE, delay: 0.4 }}
+      onClick={() => navigate("/chat")}
+      aria-label="Ask the AI assistant"
+      data-testid="ask-fab"
+      className="fab-shadow mobile-only fixed bottom-24 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-signal text-white transition-transform active:scale-95 md:hidden"
+    >
+      <MessageSquare size={22} strokeWidth={2} />
+    </motion.button>
+  );
+}
+
+function Nav() {
   return (
     <header
       className="sticky top-0 z-40 border-b border-line bg-white/85 backdrop-blur-xl"
@@ -91,7 +158,7 @@ function Nav() {
               <NavLink
                 key={n.to}
                 to={n.to}
-                data-testid={`nav-${n.to.slice(1)}`}
+                data-testid={`nav-${n.to.slice(1) || "home"}`}
                 className={({ isActive }) =>
                   `relative overline px-3 py-2 transition-colors ${
                     isActive ? "text-ink font-bold" : "text-muted hover:text-ink"
@@ -117,50 +184,14 @@ function Nav() {
             Ask now
           </Link>
         </nav>
-        <button
-          className="md:hidden text-ink"
-          onClick={() => setOpen((v) => !v)}
-          aria-label="menu"
-          data-testid="mobile-menu-toggle"
-        >
-          {open ? <X size={22} /> : <Menu size={22} />}
-        </button>
       </div>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="mobile-menu"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: EASE }}
-            className="overflow-hidden border-t border-line bg-white md:hidden"
-            data-testid="mobile-menu"
-          >
-            {NAV.map((n) => (
-              <NavLink
-                key={n.to}
-                to={n.to}
-                data-testid={`mobile-nav-${n.to.slice(1)}`}
-                className={({ isActive }) =>
-                  `block border-b border-line px-5 py-4 font-display text-lg ${
-                    isActive ? "bg-paper text-ink font-bold" : "text-muted"
-                  }`
-                }
-              >
-                {n.label}
-              </NavLink>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </header>
   );
 }
 
 function Footer() {
   return (
-    <footer className="mt-16 border-t border-line bg-white text-ink">
+    <footer className="desktop-only mt-16 border-t border-line bg-white text-ink">
       <div className="mx-auto grid max-w-[1400px] gap-8 px-5 py-10 md:grid-cols-4 md:px-10">
         <div>
           <div className="flex items-center gap-2">
@@ -177,10 +208,9 @@ function Footer() {
         <div>
           <p className="overline mb-3">Features</p>
           <ul className="space-y-2 text-sm">
-            <li><Link to="/chat" className="hover:text-signal">Placement Assistant</Link></li>
+            <li><Link to="/" className="hover:text-signal">Dashboard</Link></li>
+            <li><Link to="/chat" className="hover:text-signal">AI Assistant</Link></li>
             <li><Link to="/eligibility" className="hover:text-signal">Eligibility Checker</Link></li>
-            <li><Link to="/gap" className="hover:text-signal">Resume Gap Analysis</Link></li>
-            <li><Link to="/interview" className="hover:text-signal">Interview Prep</Link></li>
             <li><Link to="/companies" className="hover:text-signal">Company Explorer</Link></li>
             <li><Link to="/compare" className="hover:text-signal">Company Compare</Link></li>
           </ul>
@@ -218,14 +248,13 @@ function AnimatedRoutes() {
   return (
     <div key={location.pathname} className={skip ? "" : "route-fade"}>
       <Routes location={location}>
-        <Route path="/" element={<Landing />} />
+        <Route path="/" element={<Dashboard />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/eligibility" element={<Eligibility />} />
-        <Route path="/gap" element={<GapAnalysis />} />
-        <Route path="/interview" element={<InterviewPrep />} />
         <Route path="/companies" element={<Companies />} />
         <Route path="/companies/:id" element={<CompanyDetail />} />
         <Route path="/compare" element={<Compare />} />
+        <Route path="*" element={<Dashboard />} />
       </Routes>
     </div>
   );
@@ -237,13 +266,15 @@ export default function App() {
       <MotionConfig reducedMotion="user">
         <div className="flex min-h-screen flex-col bg-paper">
           <Nav />
-          <main className="flex-1" data-testid="main-content">
+          <main className="flex-1 pb-20 md:pb-0" data-testid="main-content">
             <ErrorBoundary>
               <AnimatedRoutes />
             </ErrorBoundary>
           </main>
           <Footer />
-          <Toaster position="top-right" richColors closeButton />
+          <BottomNav />
+          <AskFab />
+          <Toaster position="top-right" richColors closeButton mobileToasts />
         </div>
       </MotionConfig>
     </BrowserRouter>

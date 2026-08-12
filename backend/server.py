@@ -280,7 +280,7 @@ handler = app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in CORS.split(",")] if CORS != "*" else ["*"],
-    allow_credentials=True,
+    allow_credentials=CORS != "*",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -390,6 +390,64 @@ async def companies_stats():
         "by_batch": [{"batch": b, "count": n} for b, n in sorted(by_batch.items())],
         "top_recruiters": [{"company": c, "count": n} for c, n in top_recruiters_sorted],
         "top_roles": [{"role": r, "count": n} for r, n in top_roles_sorted],
+    }
+
+
+@app.get("/api/dashboard")
+async def dashboard_stats():
+    await ensure_initialized()
+    total = await db.companies.count_documents({})
+    ctc_values = []
+    ctc_buckets = {"0-5": 0, "5-10": 0, "10-15": 0, "15-20": 0, "20+": 0}
+    by_batch = {}
+    top_recruiters = {}
+    top_roles = {}
+    branch_counts = {}
+    branch_aliases = {
+        "CS": ["CS", "CE", "CSE", "COMPUTER"],
+        "IT": ["IT", "INFORMATION"],
+        "EXTC": ["EXTC", "ECE", "ELECTRONICS"],
+        "MECH": ["MECH"],
+        "CIVIL": ["CIVIL"],
+        "MCA": ["MCA"],
+        "AI": ["AI"],
+        "DS": ["DS"],
+    }
+    async for c in db.companies.find({}, {"ctc": 1, "role": 1, "company": 1, "source_file": 1, "branches": 1, "_id": 0}):
+        v = _extract_ctc_float(c.get("ctc"))
+        if v is not None:
+            ctc_values.append(v)
+            if v < 5:
+                ctc_buckets["0-5"] += 1
+            elif v < 10:
+                ctc_buckets["5-10"] += 1
+            elif v < 15:
+                ctc_buckets["10-15"] += 1
+            elif v < 20:
+                ctc_buckets["15-20"] += 1
+            else:
+                ctc_buckets["20+"] += 1
+        b = batch_of(c)
+        by_batch[b] = by_batch.get(b, 0) + 1
+        name = str(c.get("company") or "").strip()
+        if name:
+            top_recruiters[name] = top_recruiters.get(name, 0) + 1
+        r = (c.get("role") or "").split(",")[0].strip()[:40]
+        if r:
+            top_roles[r] = top_roles.get(r, 0) + 1
+        branches_str = str(c.get("branches") or "").upper()
+        for tag, aliases in branch_aliases.items():
+            if any(a in branches_str for a in aliases):
+                branch_counts[tag] = branch_counts.get(tag, 0) + 1
+    return {
+        "total_companies": total,
+        "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
+        "max_ctc_lpa": round(max(ctc_values), 2) if ctc_values else 0,
+        "by_batch": [{"batch": b, "count": n} for b, n in sorted(by_batch.items())],
+        "top_recruiters": [{"company": c, "count": n} for c, n in sorted(top_recruiters.items(), key=lambda x: -x[1])[:8]],
+        "top_roles": [{"role": r, "count": n} for r, n in sorted(top_roles.items(), key=lambda x: -x[1])[:6]],
+        "ctc_buckets": [{"range": k, "count": v} for k, v in ctc_buckets.items()],
+        "branch_coverage": [{"branch": b, "count": n} for b, n in sorted(branch_counts.items(), key=lambda x: -x[1])[:6]],
     }
 
 

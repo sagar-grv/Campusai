@@ -82,7 +82,7 @@ export default function Compare() {
 
       <div className="mb-8 sharp-card p-6">
         <div className="overline mb-3">SELECT COMPANIES TO COMPARE</div>
-        <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="chip-scroll flex items-center gap-2 overflow-x-auto mb-4">
           <AnimatePresence initial={false}>
             {selectedIds.map((id) => {
               const comp = allCompanies.find((c) => (c.id || c.company) === id);
@@ -94,18 +94,22 @@ export default function Compare() {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.85 }}
                   transition={{ type: "spring", duration: 0.3, bounce: 0 }}
-                  className="inline-flex items-center gap-1.5 bg-ink text-white px-3 py-1 font-mono text-xs rounded-full"
+                  className="inline-flex shrink-0 items-center gap-1.5 bg-ink text-white pl-4 pr-0 font-mono text-xs rounded-full min-h-[44px]"
                 >
                   {comp?.company || id}
-                  <button onClick={() => toggleSelect(comp || { id })} aria-label={`remove ${comp?.company || id}`}>
-                    <X size={12} />
+                  <button
+                    onClick={() => toggleSelect(comp || { id })}
+                    aria-label={`remove ${comp?.company || id}`}
+                    className="flex w-11 self-stretch items-center justify-center"
+                  >
+                    <X size={14} />
                   </button>
                 </motion.span>
               );
             })}
           </AnimatePresence>
           {selectedIds.length === 0 && (
-            <span className="text-sm text-muted">
+            <span className="shrink-0 text-sm text-muted">
               No companies selected yet. Click companies below to select.
             </span>
           )}
@@ -130,7 +134,7 @@ export default function Compare() {
               <button
                 key={i}
                 onClick={() => toggleSelect(c)}
-                className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition-colors ${
+                className={`flex w-full min-h-[44px] items-center justify-between px-4 py-2.5 text-left text-sm transition-colors ${
                   isSel ? "bg-paper font-bold text-signal" : "hover:bg-paper"
                 }`}
               >
@@ -165,22 +169,31 @@ export default function Compare() {
         <div className="space-y-6 fade-up">
           {comparison.ai_comparison && (
             <FadeUp>
-              <div className="sharp-card border-l-4 border-l-signal p-6 bg-paper">
+              <div className="w-full min-w-0 sharp-card border-l-4 border-l-signal p-6 bg-paper">
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles className="text-signal" size={18} />
                   <span className="overline">AI COMPARATIVE INSIGHTS</span>
                 </div>
-                <FormattedMarkdown content={comparison.ai_comparison} className="text-sm" />
+                <FormattedMarkdown
+                  content={comparison.ai_comparison}
+                  className="text-sm break-words [overflow-wrap:anywhere]"
+                />
               </div>
             </FadeUp>
           )}
 
           <Stagger animate gap={0.08}>
-          <div className="overflow-x-auto border border-line bg-white">
-            <table className="w-full text-left border-collapse">
+          <div className="mobile-only flex justify-end mb-2">
+            <span className="overline text-muted" data-testid="compare-swipe-hint">SWIPE →</span>
+          </div>
+          <div className="overflow-x-auto border border-line bg-white" data-testid="compare-scroll-container">
+            <table className="w-full text-left border-collapse min-w-[640px]" data-testid="compare-table">
               <thead>
                 <tr className="border-b border-line bg-paper">
-                  <th className="p-4 font-mono text-xs uppercase tracking-widerX border-r border-line min-w-[150px]">
+                  <th
+                    data-testid="compare-sticky-col"
+                    className="sticky left-0 z-10 p-4 font-mono text-xs uppercase tracking-widerX border-r border-line bg-paper min-w-[150px] shadow-[2px_0_0_rgba(0,0,0,0.06)] md:static md:shadow-none"
+                  >
                     CRITERIA
                   </th>
                   {comparison.companies.map((c, i) => (
@@ -195,7 +208,7 @@ export default function Compare() {
               </thead>
               <tbody className="divide-y divide-line text-sm">
                 <tr>
-                  <td className="p-4 font-mono text-xs text-muted border-r border-line bg-paper/50">
+                  <td className="sticky left-0 z-10 p-4 font-mono text-xs text-muted border-r border-line bg-paper shadow-[2px_0_0_rgba(0,0,0,0.06)] md:static md:shadow-none">
                     CTC / PACKAGE
                   </td>
                   {comparison.companies.map((c, i) => (
@@ -205,7 +218,7 @@ export default function Compare() {
                   ))}
                 </tr>
                 <tr>
-                  <td className="p-4 font-mono text-xs text-muted border-r border-line bg-paper/50">
+                  <td className="sticky left-0 z-10 p-4 font-mono text-xs text-muted border-r border-line bg-paper shadow-[2px_0_0_rgba(0,0,0,0.06)] md:static md:shadow-none">
                     ROLE(S)
                   </td>
                   {comparison.companies.map((c, i) => (
@@ -215,7 +228,7 @@ export default function Compare() {
                   ))}
                 </tr>
                 <tr>
-                  <td className="p-4 font-mono text-xs text-muted border-r border-line bg-paper/50">
+                  <td className="sticky left-0 z-10 p-4 font-mono text-xs text-muted border-r border-line bg-paper shadow-[2px_0_0_rgba(0,0,0,0.06)] md:static md:shadow-none">
                     ELIGIBLE BRANCHES
                   </td>
                   {comparison.companies.map((c, i) => (
@@ -225,7 +238,7 @@ export default function Compare() {
                   ))}
                 </tr>
                 <tr>
-                  <td className="p-4 font-mono text-xs text-muted border-r border-line bg-paper/50">
+                  <td className="sticky left-0 z-10 p-4 font-mono text-xs text-muted border-r border-line bg-paper shadow-[2px_0_0_rgba(0,0,0,0.06)] md:static md:shadow-none">
                     ELIGIBILITY / CUTOFF
                   </td>
                   {comparison.companies.map((c, i) => (
@@ -235,7 +248,7 @@ export default function Compare() {
                   ))}
                 </tr>
                 <tr>
-                  <td className="p-4 font-mono text-xs text-muted border-r border-line bg-paper/50">
+                  <td className="sticky left-0 z-10 p-4 font-mono text-xs text-muted border-r border-line bg-paper shadow-[2px_0_0_rgba(0,0,0,0.06)] md:static md:shadow-none">
                     SELECTION PROCESS
                   </td>
                   {comparison.companies.map((c, i) => (

@@ -105,6 +105,11 @@ export async function getStats() {
   return r.data;
 }
 
+export async function getDashboard() {
+  const r = await api.get("/dashboard");
+  return r.data;
+}
+
 export async function parseResume(file) {
   const fd = new FormData();
   fd.append("file", file);

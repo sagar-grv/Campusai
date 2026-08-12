@@ -114,7 +114,7 @@ export default function CompanyDetail() {
       ) : company ? (
         <div className="space-y-6 fade-up">
           <h1
-            className="font-display text-4xl font-black tracking-tighter md:text-6xl"
+            className="font-display text-3xl font-black tracking-tighter md:text-6xl"
             data-testid="company-detail-title"
           >
             {company.company || "—"}
@@ -158,7 +158,9 @@ export default function CompanyDetail() {
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="sharp-card p-5" data-testid="company-detail-eligibility">
               <div className="overline mb-2">ELIGIBILITY</div>
-              <p className="text-sm text-muted">{company.eligibility || "—"}</p>
+              <p className="break-words text-sm text-muted [overflow-wrap:anywhere]">
+                {company.eligibility || "—"}
+              </p>
               {company.cgpa && (
                 <span className="mt-3 inline-block bg-paper px-2 py-1 font-mono text-xs text-signal border border-line">
                   CGPA: {company.cgpa}
@@ -171,12 +173,12 @@ export default function CompanyDetail() {
                 <GraduationCap size={14} className="text-signal" strokeWidth={1.5} />
                 <span className="overline">BRANCHES</span>
               </div>
-              <p className="mt-1 text-sm text-muted">{company.branches || "All branches"}</p>
+              <p className="mt-1 break-words text-sm text-muted">{company.branches || "All branches"}</p>
             </div>
 
             <div className="sharp-card p-5" data-testid="company-detail-notes">
               <div className="overline mb-2">SELECTION PROCESS / NOTES</div>
-              <p className="text-sm text-muted">{company.notes || "—"}</p>
+              <p className="break-words text-sm text-muted">{company.notes || "—"}</p>
             </div>
 
             <div className="sharp-card p-5" data-testid="company-detail-backlog">
@@ -205,7 +207,7 @@ function Detail({ icon, label, value }) {
         {icon}
         <span className="overline">{label}</span>
       </div>
-      <p className="mt-1 text-sm">{value || "—"}</p>
+      <p className="mt-1 break-words text-sm">{value || "—"}</p>
     </div>
   );
 }
