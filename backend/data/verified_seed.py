@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SEED_VERSION = "verified-v1"
+SEED_VERSION = "verified-v2"
 
 _DATA_DIR = Path(__file__).resolve().parent
 _JSON_FILES = ("verified_2025.json", "verified_2023_24.json")

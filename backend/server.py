@@ -10,6 +10,7 @@ import json
 import uuid
 import asyncio
 import secrets
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -265,6 +266,10 @@ async def _seed_verified_data():
     the PDF text layer is corrupted (e.g. Winjit "receivabl9e. 30 LPA"). The verified
     dataset is the source of truth; the parser now only handles genuinely new uploads.
 
+    Seeding is guarded by a cross-instance DB lock (`_id: "placement_seed_lock"`)
+    so concurrent serverless cold starts cannot double-insert the dataset. On Vercel
+    each lambda instance has its own process-local asyncio.Lock, which is not enough.
+
     Embeddings are stored together with the records when Gemini is available. If the
     embed step fails (quota / not configured) the marker records `embedded: false`, and
     later boots retry embedding in place instead of re-seeding from scratch.
@@ -289,44 +294,73 @@ async def _seed_verified_data():
     if marker.get("seed") == "pdf-ingest":
         return
 
-    seed_records = load_verified_seed()
-    for rec in seed_records:
-        rec["branches_canonical"] = normalize_branches(rec.get("branches") or "")
-
-    async with _embed_mutex:
-        # Re-check under the lock in case a concurrent worker seeded first.
-        marker = await db.meta.find_one({"_id": "placement_seed"}) or {}
-        if marker.get("seed") == SEED_VERSION or marker.get("seed") == "pdf-ingest":
-            return
-        await db.companies.delete_many({})
-        await db.chunks.delete_many({})
-
-        documents = _build_records_documents(seed_records)
-        embedded = False
-        if gemini and gemini.ready:
+    # Cross-instance claim so only one lambda seeds at a time.
+    token = str(uuid.uuid4())
+    now_ts = time.time()
+    claimed = await db.meta.update_one(
+        {"_id": "placement_seed_lock", "expires_at": {"$lt": now_ts}},
+        {"$set": {"token": token, "expires_at": now_ts + 120}},
+        upsert=False,
+    )
+    if claimed.modified_count == 0:
+        # Lock exists and is fresh - check if we hold it (first claim on fresh DB).
+        lock = {}
+        try:
+            lock = await db.meta.find_one({"_id": "placement_seed_lock"}) or {}
+        except Exception:
+            pass
+        if not lock:
             try:
-                vectors = await gemini.embed_many([d["text"] for d in documents], task_type="RETRIEVAL_DOCUMENT")
-                for doc, vec in zip(documents, vectors):
-                    doc["embedding"] = vec
-                    doc["embedding_dim"] = len(vec)
-                embedded = True
-            except Exception as e:
-                print(f"[seed] embedding skipped ({sanitize_log_message(str(e))}); storing without vectors.")
-        else:
-            print("[seed] Gemini not ready; storing verified records without embeddings.")
+                await db.meta.insert_one({"_id": "placement_seed_lock", "token": token,
+                                          "expires_at": now_ts + 120})
+                lock = {"token": token, "expires_at": now_ts + 120}
+            except Exception:
+                lock = {}
+        if lock.get("token") != token:
+            print("[seed] Another lambda instance is seeding; skipping.")
+            return
 
-        if seed_records:
-            await db.companies.insert_many(seed_records, ordered=False)
-        if documents:
-            await db.chunks.insert_many(documents)
-        await db.meta.update_one(
-            {"_id": "placement_seed"},
-            {"$set": {"seed": SEED_VERSION, "at": now_iso(), "n": len(seed_records),
-                      "chunks": len(documents), "embedded": embedded}},
-            upsert=True,
-        )
-        print(f"[seed] Seeded verified dataset: {len(seed_records)} companies, {len(documents)} chunks "
-              f"(embedded={embedded}).")
+    try:
+        seed_records = load_verified_seed()
+        for rec in seed_records:
+            rec["branches_canonical"] = normalize_branches(rec.get("branches") or "")
+
+        async with _embed_mutex:
+            await db.companies.delete_many({})
+            await db.chunks.delete_many({})
+
+            documents = _build_records_documents(seed_records)
+            embedded = False
+            if gemini and gemini.ready:
+                try:
+                    vectors = await gemini.embed_many([d["text"] for d in documents], task_type="RETRIEVAL_DOCUMENT")
+                    for doc, vec in zip(documents, vectors):
+                        doc["embedding"] = vec
+                        doc["embedding_dim"] = len(vec)
+                    embedded = True
+                except Exception as e:
+                    print(f"[seed] embedding skipped ({sanitize_log_message(str(e))}); storing without vectors.")
+            else:
+                print("[seed] Gemini not ready; storing verified records without embeddings.")
+
+            if seed_records:
+                await db.companies.insert_many(seed_records, ordered=False)
+            if documents:
+                await db.chunks.insert_many(documents)
+            await db.meta.update_one(
+                {"_id": "placement_seed"},
+                {"$set": {"seed": SEED_VERSION, "at": now_iso(), "n": len(seed_records),
+                          "chunks": len(documents), "embedded": embedded}},
+                upsert=True,
+            )
+            print(f"[seed] Seeded verified dataset: {len(seed_records)} companies, {len(documents)} chunks "
+                  f"(embedded={embedded}).")
+    finally:
+        # Release the claim (idempotent).
+        try:
+            await db.meta.delete_one({"_id": "placement_seed_lock", "token": token})
+        except Exception:
+            pass
 
 
 async def _embed_existing_chunks():
