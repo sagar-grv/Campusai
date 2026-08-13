@@ -752,7 +752,7 @@ async def companies_stats():
     by_batch = {}
     top_recruiters = {}
     top_roles = {}
-    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "_id": 0}):
+    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "batch": 1, "_id": 0}):
         v = _ctc_value(c)
         if v is not None:
             ctc_values.append(v)
@@ -786,7 +786,7 @@ async def dashboard_stats(request: Request = None):
     top_recruiters = {}
     top_roles = {}
     branch_counts = {}
-    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "branches": 1, "branches_canonical": 1, "_id": 0}):
+    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "branches": 1, "branches_canonical": 1, "batch": 1, "_id": 0}):
         v = _ctc_value(c)
         if v is not None:
             ctc_values.append(v)
