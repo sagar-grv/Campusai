@@ -690,14 +690,14 @@ async def ingest_placement_pdf(
 
 
 def batch_of(doc: dict) -> str:
+    batch_val = str(doc.get("batch") or "").strip()
+    if batch_val in ("2023-24", "2025"):
+        return batch_val
     src = str(doc.get("source_file") or "")
     if "2023" in src:
         return "2023-24"
     if "2025" in src:
         return "2025"
-    batch_val = str(doc.get("batch") or "").strip()
-    if batch_val in ("2023-24", "2025"):
-        return batch_val
     return "Other"
 
 
