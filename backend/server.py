@@ -9,6 +9,7 @@ import io
 import json
 import uuid
 import asyncio
+import secrets
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ from typing import List, Optional
 
 import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -33,6 +34,9 @@ from security import (
     STRICT_SYSTEM_GUARDRAILS,
     PER_ENDPOINT_LIMITS,
 )
+from ingest.parser import parse_placement_pdf
+from data.verified_seed import load_verified_seed, SEED_VERSION
+from data.branches import normalize_branches, matches_allowed, canonical_for_tags
 
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
@@ -40,11 +44,15 @@ load_dotenv(ROOT / ".env")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "campus_ai")
 CORS = os.environ.get("CORS_ORIGINS", "*")
-SEED_VERSION = 2
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change_me")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change_me_to_a_long_random_string")
 
 mongo: Optional[AsyncIOMotorClient] = None
 db = None
 gemini: Optional[GeminiClient] = None
+DB_MODE = "mock"
+_embed_mutex = asyncio.Lock()
 
 
 # ---------- utilities ----------
@@ -71,6 +79,38 @@ def cosine(a: List[float], b: List[float]) -> float:
     va = np.asarray(a, dtype=np.float32)
     vb = np.asarray(b, dtype=np.float32)
     return float(np.dot(va, vb))  # both unit-normalised upstream
+
+
+# ---------- usage tracking & admin auth ----------
+async def record_usage(event: str, client_ip: str = None, visitor_id: str = None, **payload):
+    """Fire-and-forget usage event recorder. Never raises."""
+    try:
+        if db is None:
+            return
+        await db.usage.insert_one({
+            "event": event,
+            "client_ip": client_ip,
+            "visitor_id": visitor_id,
+            "ts": now_iso(),
+            **payload,
+        })
+    except Exception as e:
+        print(f"[usage] could not record {event}: {sanitize_log_message(str(e))}")
+
+
+def _visitor_id(request: Request, client_ip: str) -> str:
+    return request.headers.get("X-Visitor-Id") or client_ip
+
+
+def _db_mode() -> str:
+    return DB_MODE
+
+
+def require_admin(request: Request) -> None:
+    auth = request.headers.get("Authorization", "")
+    expected = f"Bearer {ADMIN_TOKEN}"
+    if not secrets.compare_digest(auth, expected):
+        raise HTTPException(401, "Invalid or missing admin token.")
 
 
 # ---------- data models ----------
@@ -126,6 +166,11 @@ class CompareRequest(BaseModel):
     company_ids: List[str] = Field(min_items=1, max_items=4)
 
 
+class AdminLogin(BaseModel):
+    username: str
+    password: str
+
+
 # ---------- resume parsing ----------
 def parse_resume(filename: str, content: bytes) -> str:
     fn = filename.lower()
@@ -146,95 +191,9 @@ def parse_resume(filename: str, content: bytes) -> str:
     raise HTTPException(400, "Unsupported file. Use PDF, DOCX, or TXT.")
 
 
-# ---------- seeding ----------
-async def seed_placement_data():
-    """One-time seeding of company placement DB into MongoDB with embeddings."""
-    seed_marker = await db.meta.find_one({"_id": "placement_seed"})
-    if seed_marker and seed_marker.get("version") == SEED_VERSION:
-        return
-
-    companies_path = ROOT / "data" / "companies.json"
-    if not companies_path.exists():
-        print("[seed] companies.json not found, skipping")
-        return
-
-    with open(companies_path) as f:
-        payload = json.load(f)
-
-    documents = []
-    for entry in payload:
-        # Build a rich text chunk about each company
-        parts = [f"Company: {entry.get('company', 'Unknown')}"]
-        if entry.get("batch"):
-            parts.append(f"Batch: {entry['batch']}")
-        if entry.get("ctc"):
-            parts.append(f"CTC / Package: {entry['ctc']}")
-        if entry.get("role"):
-            parts.append(f"Role(s): {entry['role']}")
-        if entry.get("branches"):
-            parts.append(f"Eligible branches: {entry['branches']}")
-        if entry.get("cgpa"):
-            parts.append(f"Minimum CGPA / Percentage: {entry['cgpa']}")
-        if entry.get("eligibility"):
-            parts.append(f"Eligibility criteria: {entry['eligibility']}")
-        if entry.get("mode"):
-            parts.append(f"Mode: {entry['mode']}")
-        if entry.get("date"):
-            parts.append(f"Drive date: {entry['date']}")
-        if entry.get("notes"):
-            parts.append(f"Process / Notes: {entry['notes']}")
-        text = ". ".join(parts) + "."
-
-        documents.append({
-            "id": str(uuid.uuid4()),
-            "text": text,
-            "source": f"{entry.get('source_file', 'placement_db')}::{entry.get('company','Unknown')}",
-            "type": "placement",
-            "company_data": entry,
-            "created_at": now_iso(),
-        })
-
-    # Store raw structured company list immediately for Explorer & Eligibility UI
-    await db.companies.delete_many({})
-    company_docs = [{
-        "id": str(uuid.uuid4()),
-        **entry,
-        "created_at": now_iso(),
-    } for entry in payload]
-    if company_docs:
-        await db.companies.insert_many(company_docs)
-    print(f"[seed] Inserted {len(company_docs)} raw company records into DB.")
-
-    cache_file = ROOT / "data" / "embedded_chunks_cache.json"
-    if cache_file.exists():
-        print(f"[seed] Loading cached embeddings from {cache_file.name}...")
-        with open(cache_file, "r") as f:
-            documents = json.load(f)
-    else:
-        print(f"[seed] Embedding {len(documents)} placement records via Gemini...")
-        texts = [d["text"] for d in documents]
-        vectors = await gemini.embed_many(texts, task_type="RETRIEVAL_DOCUMENT")
-        for d, v in zip(documents, vectors):
-            d["embedding"] = v
-            d["embedding_dim"] = len(v)
-        try:
-            with open(cache_file, "w") as f:
-                json.dump(documents, f)
-            print(f"[seed] Cached embeddings saved to {cache_file.name}")
-        except Exception as e:
-            print(f"[seed] Could not cache embeddings: {e}")
-
-    await db.chunks.delete_many({})
-    if documents:
-        await db.chunks.insert_many(documents)
-
-    await db.meta.insert_one({"_id": "placement_seed", "at": now_iso(), "n": len(documents)})
-    print(f"[seed] Done. Loaded {len(documents)} embedded chunks into DB.")
-
-
 # ---------- initialization ----------
 async def ensure_initialized():
-    global mongo, db, gemini
+    global mongo, db, gemini, DB_MODE
     if gemini is None:
         try:
             gemini = GeminiClient()
@@ -245,21 +204,153 @@ async def ensure_initialized():
             real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=10000)
             await real_mongo.admin.command("ping")
             mongo = real_mongo
+            DB_MODE = "real"
             print("[db] Connected to real MongoDB instance.")
         except Exception as e:
             print(f"[db] Real MongoDB unavailable ({e}), using in-memory mongomock_motor client.")
             try:
                 from mongomock_motor import AsyncMongoMockClient
                 mongo = AsyncMongoMockClient()
+                DB_MODE = "mock"
             except Exception as e2:
                 print(f"[db] mongomock_motor fallback error: {e2}")
                 mongo = None
         if mongo:
             db = mongo[DB_NAME]
+    if db is not None:
+        try:
+            await _seed_verified_data()
+        except Exception as e:
+            print(f"[db] verified-seed error: {sanitize_log_message(str(e))}")
+
+
+def _build_records_documents(all_records: list) -> list:
+    """Build RAG chunk documents for a list of company records (shared by ingest + seed)."""
+    documents = []
+    for rec in all_records:
+        parts = [f"Company: {rec.get('company') or 'Unknown'}"]
+        if rec.get("batch"):
+            parts.append(f"Batch: {rec['batch']}")
+        if rec.get("ctc"):
+            parts.append(f"CTC / Package: {rec['ctc']}")
+        if rec.get("role"):
+            parts.append(f"Role(s): {rec['role']}")
+        if rec.get("branches"):
+            parts.append(f"Eligible branches: {rec['branches']}")
+        if rec.get("cgpa"):
+            parts.append(f"Minimum CGPA / Percentage: {rec['cgpa']}")
+        if rec.get("eligibility"):
+            parts.append(f"Eligibility criteria: {rec['eligibility']}")
+        if rec.get("mode"):
+            parts.append(f"Mode: {rec['mode']}")
+        if rec.get("date"):
+            parts.append(f"Drive date: {rec['date']}")
+        if rec.get("notes"):
+            parts.append(f"Process / Notes: {rec['notes']}")
+        documents.append({
+            "id": str(uuid.uuid4()),
+            "text": ". ".join(parts) + ".",
+            "source": f"{rec.get('source_file', 'placement_db')}::{rec.get('company') or 'Unknown'}",
+            "type": "placement",
+            "company_data": rec,
+            "created_at": now_iso(),
+        })
+    return documents
+
+
+async def _seed_verified_data():
+    """Load the verified (agentic-extracted) placement dataset when missing or outdated.
+
+    The regex/pdfplumber parser produces wrong CTCs for several companies because
+    the PDF text layer is corrupted (e.g. Winjit "receivabl9e. 30 LPA"). The verified
+    dataset is the source of truth; the parser now only handles genuinely new uploads.
+
+    Embeddings are stored together with the records when Gemini is available. If the
+    embed step fails (quota / not configured) the marker records `embedded: false`, and
+    later boots retry embedding in place instead of re-seeding from scratch.
+    """
+    global _embed_mutex
+    marker = {}
+    try:
+        marker = await db.meta.find_one({"_id": "placement_seed"}) or {}
+    except Exception:
+        pass
+
+    # Already seeded: only re-embed if vectors are missing and Gemini became ready.
+    if marker.get("seed") == SEED_VERSION:
+        if marker.get("embedded"):
+            return
+        if gemini and gemini.ready:
+            async with _embed_mutex:
+                marker = await db.meta.find_one({"_id": "placement_seed"}) or {}
+                if marker.get("seed") == SEED_VERSION and not marker.get("embedded"):
+                    await _embed_existing_chunks()
+        return
+    if marker.get("seed") == "pdf-ingest":
+        return
+
+    seed_records = load_verified_seed()
+    for rec in seed_records:
+        rec["branches_canonical"] = normalize_branches(rec.get("branches") or "")
+
+    async with _embed_mutex:
+        # Re-check under the lock in case a concurrent worker seeded first.
+        marker = await db.meta.find_one({"_id": "placement_seed"}) or {}
+        if marker.get("seed") == SEED_VERSION or marker.get("seed") == "pdf-ingest":
+            return
+        await db.companies.delete_many({})
+        await db.chunks.delete_many({})
+
+        documents = _build_records_documents(seed_records)
+        embedded = False
+        if gemini and gemini.ready:
             try:
-                await seed_placement_data()
+                vectors = await gemini.embed_many([d["text"] for d in documents], task_type="RETRIEVAL_DOCUMENT")
+                for doc, vec in zip(documents, vectors):
+                    doc["embedding"] = vec
+                    doc["embedding_dim"] = len(vec)
+                embedded = True
             except Exception as e:
-                print(f"[seed] Seeding exception: {e}")
+                print(f"[seed] embedding skipped ({sanitize_log_message(str(e))}); storing without vectors.")
+        else:
+            print("[seed] Gemini not ready; storing verified records without embeddings.")
+
+        if seed_records:
+            await db.companies.insert_many(seed_records, ordered=False)
+        if documents:
+            await db.chunks.insert_many(documents)
+        await db.meta.update_one(
+            {"_id": "placement_seed"},
+            {"$set": {"seed": SEED_VERSION, "at": now_iso(), "n": len(seed_records),
+                      "chunks": len(documents), "embedded": embedded}},
+            upsert=True,
+        )
+        print(f"[seed] Seeded verified dataset: {len(seed_records)} companies, {len(documents)} chunks "
+              f"(embedded={embedded}).")
+
+
+async def _embed_existing_chunks():
+    """Fill missing embeddings for already-seeded chunks (post-quota recovery)."""
+    try:
+        docs = await db.chunks.find(
+            {"type": "placement", "embedding": {"$exists": False}},
+            {"text": 1},
+        ).to_list(length=10000)
+        pending = [d["text"] for d in docs if d.get("text")]
+        if not pending:
+            await db.meta.update_one({"_id": "placement_seed"}, {"$set": {"embedded": True}})
+            print("[seed] No missing embeddings found; marked embedded.")
+            return
+        vectors = await gemini.embed_many(pending, task_type="RETRIEVAL_DOCUMENT")
+        for doc, vec in zip(docs, vectors):
+            await db.chunks.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"embedding": vec, "embedding_dim": len(vec)}},
+            )
+        await db.meta.update_one({"_id": "placement_seed"}, {"$set": {"embedded": True}})
+        print(f"[seed] Backfilled embeddings for {len(pending)} chunks.")
+    except Exception as e:
+        print(f"[seed] embedding backfill failed ({sanitize_log_message(str(e))}); will retry next boot.")
 
 
 # ---------- lifespan ----------
@@ -311,6 +402,250 @@ async def health():
     }
 
 
+# ---------- admin ----------
+@app.post("/api/admin/login")
+async def admin_login(body: AdminLogin):
+    ok_user = secrets.compare_digest(str(body.username or ""), ADMIN_USERNAME)
+    ok_pass = secrets.compare_digest(str(body.password or ""), ADMIN_PASSWORD)
+    if not (ok_user and ok_pass):
+        raise HTTPException(401, "Invalid credentials.")
+    return {
+        "token": ADMIN_TOKEN,
+        "status_db": _db_mode(),
+        "gemini_ready": gemini is not None and (gemini.ready or bool(os.environ.get("NVIDIA_API_KEY"))),
+    }
+
+
+@app.get("/api/admin/usage", dependencies=[Depends(require_admin)])
+async def admin_usage():
+    await ensure_initialized()
+    from collections import Counter
+    from datetime import datetime, timezone, timedelta
+    all_rows = await db.usage.find({}, {"_id": 0}).to_list(length=100000)
+
+    total_requests = len(all_rows)
+    visitors = {(r.get("visitor_id") or r.get("client_ip")) for r in all_rows if (r.get("visitor_id") or r.get("client_ip"))}
+    ips = {r.get("client_ip") for r in all_rows if r.get("client_ip")}
+
+    per_endpoint = Counter(r.get("event") or "unknown" for r in all_rows)
+    top_questions = Counter((r.get("question") or "")[:200] for r in all_rows if r.get("question"))
+    top_companies = Counter()
+    for r in all_rows:
+        for c in (r.get("matched_companies") or []):
+            if c:
+                top_companies[str(c)] += 1
+
+    today = datetime.now(timezone.utc).date()
+    day_list = [(today - timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
+    days = Counter((r.get("ts") or "")[:10] for r in all_rows)
+
+    recent = sorted(all_rows, key=lambda r: str(r.get("ts") or ""), reverse=True)[:15]
+
+    return {
+        "total_requests": total_requests,
+        "unique_visitors": len(visitors),
+        "unique_ips": len(ips),
+        "per_endpoint": [{"event": e, "count": n} for e, n in per_endpoint.most_common()],
+        "daily": [{"date": d, "count": days.get(d, 0)} for d in day_list],
+        "top_questions": [{"question": q, "count": n} for q, n in top_questions.most_common(8)],
+        "top_companies": [{"company": c, "count": n} for c, n in top_companies.most_common(8)],
+        "recent": [
+            {"event": r.get("event"), "ts": r.get("ts"), "visitor_id": r.get("visitor_id")}
+            for r in recent
+        ],
+    }
+
+
+@app.get("/api/admin/status", dependencies=[Depends(require_admin)])
+async def admin_status():
+    await ensure_initialized()
+    companies_count = await db.companies.count_documents({}) if db else 0
+    chunks_count = await db.chunks.count_documents({}) if db else 0
+    last_ingest = None
+    if db is not None:
+        marker = await db.meta.find_one({"_id": "placement_seed"})
+        if marker:
+            last_ingest = {k: v for k, v in marker.items() if k != "_id"}
+    return {
+        "db_mode": _db_mode(),
+        "gemini_ready": gemini is not None and (gemini.ready or bool(os.environ.get("NVIDIA_API_KEY"))),
+        "chat_model": os.environ.get("CHAT_MODEL", "gemini-2.5-flash"),
+        "embed_model": os.environ.get("EMBED_MODEL", "gemini-embedding-001"),
+        "companies_count": companies_count,
+        "chunks_count": chunks_count,
+        "last_ingest": last_ingest,
+        "rate_limits": PER_ENDPOINT_LIMITS,
+        "version": 3,
+    }
+
+
+# ---------- pdf ingestion ----------
+KNOWN_SEED_FILES = ("Company Database for 2025 batch", "Company Database 2023-24")
+
+
+async def _llm_clean_records(records: list) -> list:
+    """Pass parser output through Gemini to repair text that pdfplumber mangles.
+
+    The 2025 PDF's text layer is corrupted (e.g. Winjit "receivabl9e. 30 LPA"),
+    so regex extraction can read wrong numbers. We ask the LLM to re-derive the
+    numeric CTC and branch list from the *raw* strings only, and forbid it from
+    inventing values. On any failure (quota, timing out) we keep parser values.
+    """
+    if not records or not gemini or not gemini.ready:
+        return records
+
+    try:
+        payload = []
+        for i, r in enumerate(records):
+            payload.append({
+                "idx": i,
+                "company": r.get("company") or "",
+                "role": r.get("role") or "",
+                "ctc": r.get("ctc") or "",
+                "branches": r.get("branches") or "",
+                "eligibility": r.get("eligibility") or "",
+            })
+        system = (
+            "You repair OCR-corrupted college placement data. You are given a list of "
+            "records with RAW text that may contain garbled characters. For each record: "
+            "1) ctc_lpa: a single number in LPA derived ONLY from its raw text. Keep it a "
+            "valid float or null. Handle stipends (per month -> annualized), joining bonuses "
+            "(add to CTC), and garbled digits (e.g. 'receivabl9e. 30 LPA' means the package "
+            "nearby, never the corrupted digit run). 2) ctc: a clean one-line display string. "
+            "3) branches: a clean comma-separated branch string (use standard tags like CS, IT, "
+            "EXTC, MECH, CIVIL, MCA, AI, DS, CSBS, MXTC, CYBER). 4) eligibility: cleaned text. "
+            "NEVER invent a CTC or branch that is not present in the raw text; if ambiguous, "
+            "set ctc_lpa to null. Reply ONLY with a JSON array [{\"idx\":..., \"ctc_lpa\":..., "
+            "\"ctc\":..., \"branches\":..., \"eligibility\":...}]."
+        )
+        prompt = f"RAW RECORDS:\n{json.dumps(payload, ensure_ascii=False)}"
+        raw = await gemini.generate(system=system, prompt=prompt, temperature=0.0, max_tokens=8000)
+        cleaned = json.loads(_strip_fence(raw))
+        if not isinstance(cleaned, list):
+            return records
+        for fix in cleaned:
+            i = int(fix.get("idx", -1))
+            if not (0 <= i < len(records)):
+                continue
+            r = records[i]
+            if fix.get("ctc_lpa") is not None:
+                try:
+                    v = float(fix["ctc_lpa"])
+                    if 0 < v <= 60:
+                        r["ctc_lpa"] = round(v, 2)
+                except (TypeError, ValueError):
+                    pass
+            if fix.get("ctc"):
+                r["ctc"] = str(fix["ctc"]).strip()
+            if fix.get("branches"):
+                r["branches"] = str(fix["branches"]).strip()
+                r["branches_canonical"] = normalize_branches(r["branches"])
+            if fix.get("eligibility"):
+                r["eligibility"] = str(fix["eligibility"]).strip()
+        print(f"[ingest] LLM clean pass applied to {len(records)} records.")
+    except Exception as e:
+        print(f"[ingest] LLM clean pass skipped ({sanitize_log_message(str(e))}); using parser values.")
+    return records
+
+
+def _strip_fence(raw: str) -> str:
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+    if raw.endswith("```"):
+        raw = raw.rsplit("```", 1)[0]
+    return raw.strip()
+
+
+@app.post("/api/ingest", dependencies=[Depends(require_admin)])
+async def ingest_placement_pdf(
+    files: List[UploadFile] = File(...),
+    batch: str = Form(""),
+    wipe: bool = Form(True),
+    request: Request = None,
+):
+    await ensure_initialized()
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["ingest"])
+
+    if not gemini or not gemini.ready:
+        raise HTTPException(503, "GEMINI_API_KEY is not configured.")
+    if not files:
+        raise HTTPException(400, "At least one PDF file is required.")
+
+    per_file = []
+    all_records = []
+    for f in files:
+        content = await f.read()
+        filename = f.filename or "upload.pdf"
+        is_known = any(k.lower() in filename.lower() for k in KNOWN_SEED_FILES)
+        if is_known:
+            seed_records = load_verified_seed()
+            matched = [dict(r) for r in seed_records if (r.get("source_file") or "").lower() in filename.lower()]
+            if matched:
+                result = {"file": filename, "parsed_count": len(matched), "expected_sr_max": len(matched)}
+                per_file.append({
+                    "file": filename,
+                    "records": len(matched),
+                    "expected_sr_max": len(matched),
+                    "verified": True,
+                })
+                all_records.extend(matched)
+                continue
+        try:
+            result = parse_placement_pdf(io.BytesIO(content), source_file_name=filename, batch_override=batch)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(400, f"Could not parse {filename} as a placement PDF: {sanitize_log_message(str(e))}")
+        per_file.append({
+            "file": result["file"],
+            "records": result["parsed_count"],
+            "expected_sr_max": result["expected_sr_max"],
+            "verified": is_known,
+        })
+        all_records.extend(result["records"])
+
+    # For genuinely new PDFs, run an LLM clean pass to repair garbled text.
+    await _llm_clean_records(all_records)
+
+    if wipe:
+        await db.companies.delete_many({})
+        await db.chunks.delete_many({})
+        await db.meta.delete_one({"_id": "placement_seed"})
+
+    for rec in all_records:
+        rec["branches_canonical"] = normalize_branches(rec.get("branches") or "")
+
+    documents = _build_records_documents(all_records)
+
+    print(f"[ingest] Embedding {len(documents)} placement records via Gemini...")
+    vectors = await gemini.embed_many([d["text"] for d in documents], task_type="RETRIEVAL_DOCUMENT")
+    for doc, vec in zip(documents, vectors):
+        doc["embedding"] = vec
+        doc["embedding_dim"] = len(vec)
+
+    if all_records:
+        await db.companies.insert_many(all_records)
+    if documents:
+        await db.chunks.insert_many(documents)
+
+    await db.meta.update_one(
+        {"_id": "placement_seed"},
+        {"$set": {"at": now_iso(), "n": len(all_records), "version": 3, "mode": "pdf-ingest", "seed": "pdf-ingest"}},
+        upsert=True,
+    )
+    print(f"[ingest] Done. {len(all_records)} companies, {len(documents)} chunks.")
+
+    return {
+        "files_processed": len(per_file),
+        "companies_inserted": len(all_records),
+        "chunks_embedded": len(documents),
+        "source_files": [p["file"] for p in per_file],
+        "per_file": per_file,
+    }
+
+
 def batch_of(doc: dict) -> str:
     src = str(doc.get("source_file") or "")
     if "2023" in src:
@@ -332,6 +667,7 @@ async def list_companies(
     sort: str = "",
     page: int = 1,
     page_size: int = 25,
+    request: Request = None,
 ):
     await ensure_initialized()
     page = max(1, page)
@@ -346,18 +682,22 @@ async def list_companies(
     if batch:
         docs = [d for d in docs if batch_of(d) == batch]
     if branch:
-        bl = branch.lower()
-        docs = [d for d in docs if bl in str(d.get("branches") or "").lower() or bl in str(d.get("eligibility") or "").lower()]
+        docs = [d for d in docs if matches_allowed(
+            str(d.get("branches_canonical") or normalize_branches(d.get("branches") or "") or ""),
+            canonical_for_tags([branch]),
+        )]
     if min_ctc and min_ctc > 0:
-        docs = [d for d in docs if (_extract_ctc_float(d.get("ctc")) or 0) >= min_ctc]
+        docs = [d for d in docs if (_ctc_value(d) or 0) >= min_ctc]
     if sort == "ctc_desc":
-        docs.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0, reverse=True)
+        docs.sort(key=lambda x: _ctc_value(x) or 0, reverse=True)
     elif sort == "ctc_asc":
-        docs.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0)
+        docs.sort(key=lambda x: _ctc_value(x) or 0)
     elif sort in ("name", "name_asc"):
         docs.sort(key=lambda x: str(x.get("company") or "").lower())
     total = len(docs)
     start = (page - 1) * page_size
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    asyncio.create_task(record_usage("companies_view", client_ip, _visitor_id(request, client_ip)))
     return {"companies": docs[start:start + page_size], "total": total, "page": page, "page_size": page_size}
 
 
@@ -369,9 +709,9 @@ async def companies_stats():
     by_batch = {}
     top_recruiters = {}
     top_roles = {}
-    async for c in db.companies.find({}, {"ctc": 1, "role": 1, "company": 1, "source_file": 1, "_id": 0}):
-        v = _extract_ctc_float(c.get("ctc"))
-        if v:
+    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "_id": 0}):
+        v = _ctc_value(c)
+        if v is not None:
             ctc_values.append(v)
         b = batch_of(c)
         by_batch[b] = by_batch.get(b, 0) + 1
@@ -394,7 +734,7 @@ async def companies_stats():
 
 
 @app.get("/api/dashboard")
-async def dashboard_stats():
+async def dashboard_stats(request: Request = None):
     await ensure_initialized()
     total = await db.companies.count_documents({})
     ctc_values = []
@@ -403,18 +743,8 @@ async def dashboard_stats():
     top_recruiters = {}
     top_roles = {}
     branch_counts = {}
-    branch_aliases = {
-        "CS": ["CS", "CE", "CSE", "COMPUTER"],
-        "IT": ["IT", "INFORMATION"],
-        "EXTC": ["EXTC", "ECE", "ELECTRONICS"],
-        "MECH": ["MECH"],
-        "CIVIL": ["CIVIL"],
-        "MCA": ["MCA"],
-        "AI": ["AI"],
-        "DS": ["DS"],
-    }
-    async for c in db.companies.find({}, {"ctc": 1, "role": 1, "company": 1, "source_file": 1, "branches": 1, "_id": 0}):
-        v = _extract_ctc_float(c.get("ctc"))
+    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "branches": 1, "branches_canonical": 1, "_id": 0}):
+        v = _ctc_value(c)
         if v is not None:
             ctc_values.append(v)
             if v < 5:
@@ -435,10 +765,14 @@ async def dashboard_stats():
         r = (c.get("role") or "").split(",")[0].strip()[:40]
         if r:
             top_roles[r] = top_roles.get(r, 0) + 1
-        branches_str = str(c.get("branches") or "").upper()
-        for tag, aliases in branch_aliases.items():
-            if any(a in branches_str for a in aliases):
-                branch_counts[tag] = branch_counts.get(tag, 0) + 1
+        canon = str(c.get("branches_canonical") or normalize_branches(c.get("branches") or "") or "")
+        if canon and canon != "ALL":
+            for tag in canon.split(","):
+                tag = tag.strip()
+                if tag:
+                    branch_counts[tag] = branch_counts.get(tag, 0) + 1
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    asyncio.create_task(record_usage("dashboard", client_ip, _visitor_id(request, client_ip)))
     return {
         "total_companies": total,
         "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
@@ -497,7 +831,7 @@ async def build_chat_context(question: str, top_k: int):
         role_name = str(c.get("role") or "").lower()
         branches_name = str(c.get("branches") or "").lower()
         elig_name = f"{c.get('eligibility') or ''} {c.get('cgpa') or ''}".lower()
-        ctc_float = _extract_ctc_float(c.get("ctc"))
+        ctc_float = _ctc_value(c)
 
         if comp_name and comp_name in ql:
             if c not in keyword_matches:
@@ -516,7 +850,7 @@ async def build_chat_context(question: str, top_k: int):
                 keyword_matches.append(c)
 
     if is_greater_query or is_highest_query:
-        keyword_matches.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0, reverse=True)
+        keyword_matches.sort(key=lambda x: _ctc_value(x) or 0, reverse=True)
 
     q_vec = (await gemini.embed_many([question], task_type="RETRIEVAL_QUERY"))[0]
     hits = []
@@ -616,6 +950,16 @@ async def chat(body: ChatRequest, request: Request):
 
     ctx = await build_chat_context(body.question, body.top_k)
 
+    visitor_id = _visitor_id(request, client_ip)
+    asyncio.create_task(record_usage(
+        "chat", client_ip, visitor_id,
+        question=body.question,
+        grounded=ctx["grounded"],
+        n_sources=len(ctx["sources"]),
+        matched_companies=[c.get("company") for c in ctx["matched_comps"]],
+        session_id=body.session_id,
+    ))
+
     if body.stream:
         return stream_chat_response(ctx, body.question)
 
@@ -657,7 +1001,7 @@ async def chat(body: ChatRequest, request: Request):
         role_name = str(c.get("role") or "").lower()
         branches_name = str(c.get("branches") or "").lower()
         elig_name = f"{c.get('eligibility') or ''} {c.get('cgpa') or ''}".lower()
-        ctc_float = _extract_ctc_float(c.get("ctc"))
+        ctc_float = _ctc_value(c)
 
         if comp_name and comp_name in ql:
             if c not in keyword_matches:
@@ -676,7 +1020,7 @@ async def chat(body: ChatRequest, request: Request):
                 keyword_matches.append(c)
 
     if is_greater_query or is_highest_query:
-        keyword_matches.sort(key=lambda x: _extract_ctc_float(x.get("ctc")) or 0, reverse=True)
+        keyword_matches.sort(key=lambda x: _ctc_value(x) or 0, reverse=True)
 
     # 2. Vector Embedding Search over db.chunks
     q_vec = (await gemini.embed_many([body.question], task_type="RETRIEVAL_QUERY"))[0]
@@ -762,6 +1106,8 @@ async def resume_parse(file: UploadFile = File(...), request: Request = None):
     rate_limiter.check_rate_limit(client_ip, limit=PER_ENDPOINT_LIMITS["parse"])
     content = await file.read()
     text = parse_resume(file.filename, content)
+    visitor_id = request.headers.get("X-Visitor-Id") if request else client_ip
+    asyncio.create_task(record_usage("resume_parse", client_ip, visitor_id, filename=file.filename))
     return {"filename": file.filename, "text": text, "chars": len(text)}
 
 
@@ -923,7 +1269,6 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
     if req.batch:
         all_companies = [c for c in all_companies if batch_of(c) == req.batch]
 
-    user_branch = req.branch.upper().strip()
     eligible_list = []
     ineligible_list = []
     marginal_list = []
@@ -934,29 +1279,12 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
         is_eligible = True
 
         elig_str = f"{c.get('eligibility') or ''} {c.get('cgpa') or ''} {c.get('notes') or ''}".lower()
-        branches_str = str(c.get("branches") or "").upper()
+        user_canon = canonical_for_tags([req.branch])
 
         # 1. Branch evaluation
-        if branches_str and "ALL" not in branches_str:
-            # check common branch tags
-            branch_match = False
-            alias_map = {
-                "CS": ["CS", "COMPUTER", "CE", "CSE"],
-                "IT": ["IT", "INFORMATION"],
-                "EXTC": ["EXTC", "ECE", "ELECTRONICS", "TELECOM"],
-                "MECH": ["MECH", "MECHANICAL"],
-                "CIVIL": ["CIVIL"],
-                "MCA": ["MCA"],
-                "AI": ["AI", "ARTIFICIAL"],
-                "DS": ["DS", "DATA SCIENCE", "DATA ANALYTICS"],
-                "CSBS": ["CSBS", "BUSINESS"],
-            }
-            target_aliases = alias_map.get(user_branch, [user_branch])
-            for alias in target_aliases:
-                if alias in branches_str:
-                    branch_match = True
-                    break
-            if not branch_match:
+        branches_canon = str(c.get("branches_canonical") or normalize_branches(c.get("branches") or "") or "")
+        if branches_canon:
+            if not matches_allowed(branches_canon, user_canon):
                 is_eligible = False
                 reasons.append(f"Branch mismatch (Eligible: {c.get('branches') or 'Varies'})")
 
@@ -992,7 +1320,7 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
                 is_marginal = True
 
         # Parse numeric CTC for stats
-        ctc_val = _extract_ctc_float(c.get("ctc"))
+        ctc_val = _ctc_value(c)
 
         company_res = {
             **c,
@@ -1009,6 +1337,15 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
             marginal_list.append(company_res)
         else:
             ineligible_list.append(company_res)
+
+    visitor_id = _visitor_id(request, client_ip)
+    asyncio.create_task(record_usage(
+        "eligibility", client_ip, visitor_id,
+        branch=req.branch,
+        cgpa=req.cgpa,
+        eligible_count=len(eligible_list),
+        marginal_count=len(marginal_list),
+    ))
 
     return {
         "summary": {
@@ -1065,6 +1402,10 @@ async def compare_companies(body: CompareRequest, request: Request):
         except Exception as e:
             comparison_ai = f"AI comparison unavailable: {e}"
 
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    visitor_id = _visitor_id(request, client_ip)
+    asyncio.create_task(record_usage("compare", client_ip, visitor_id, company_ids=body.company_ids))
+
     return {
         "companies": selected,
         "ai_comparison": comparison_ai,
@@ -1074,7 +1415,7 @@ async def compare_companies(body: CompareRequest, request: Request):
 # ---------- helper functions ----------
 def _extract_cgpa(text: str) -> Optional[float]:
     import re
-    m = re.search(r'(?:cgpa|cgpi)\s*[-:]?\s*([2-9]\.\d{1,2})', text)
+    m = re.search(r'(?:cgpa|cgpi)\s*(?:of|[-:\u2010-\u2015])?\s*([2-9]\.\d{1,2})', text)
     if m:
         try:
             return float(m.group(1))
@@ -1096,19 +1437,23 @@ def _extract_pct(text: str) -> Optional[float]:
     return None
 
 
+def _ctc_value(doc: dict) -> Optional[float]:
+    """Prefer the verified numeric ctc_lpa field; fall back to regex extraction."""
+    v = doc.get("ctc_lpa")
+    if isinstance(v, (int, float)) and v and 0 < v <= 60:
+        return float(v)
+    return _extract_ctc_float(doc.get("ctc"))
+
+
 def _extract_ctc_float(val: Optional[str]) -> Optional[float]:
     if not val:
         return None
-    buf = ""
-    for ch in str(val):
-        if ch.isdigit() or ch == ".":
-            buf += ch
-        elif buf:
-            break
-    try:
-        return float(buf) if buf else None
-    except ValueError:
+    import re
+    nums = [float(m) for m in re.findall(r'\d+(?:\.\d+)?', str(val))]
+    if not nums:
         return None
+    small = [n for n in nums if n <= 5000]
+    return max(small) if small else None
 
 
 def _safe_json(raw: str) -> dict:

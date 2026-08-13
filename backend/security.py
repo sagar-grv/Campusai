@@ -51,6 +51,7 @@ PER_ENDPOINT_LIMITS = {
     "compare": 5,
     "eligibility": 20,
     "parse": 10,
+    "ingest": 2,
 }
 
 

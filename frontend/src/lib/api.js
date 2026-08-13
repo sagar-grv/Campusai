@@ -7,6 +7,27 @@ export const api = axios.create({
   timeout: 60000,
 });
 
+let _visitorId = null;
+function getVisitorId() {
+  if (_visitorId) return _visitorId;
+  try {
+    let v = localStorage.getItem("campus-visitor");
+    if (!v) {
+      v = "v-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("campus-visitor", v);
+    }
+    _visitorId = v;
+    return v;
+  } catch {
+    return "v-anon";
+  }
+}
+
+api.interceptors.request.use((config) => {
+  config.headers["X-Visitor-Id"] = getVisitorId();
+  return config;
+});
+
 export async function health() {
   const r = await api.get("/health");
   return r.data;
@@ -134,6 +155,39 @@ export async function checkEligibility(payload) {
 
 export async function compareCompanies(company_ids) {
   const r = await api.post("/companies/compare", { company_ids });
+  return r.data;
+}
+
+export async function adminLogin(username, password) {
+  const r = await api.post("/admin/login", { username, password });
+  return r.data;
+}
+
+export async function getAdminUsage(token) {
+  const r = await api.get("/admin/usage", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return r.data;
+}
+
+export async function getAdminStatus(token) {
+  const r = await api.get("/admin/status", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return r.data;
+}
+
+export async function ingestCompanies(token, files, batch, wipe) {
+  const fd = new FormData();
+  files.forEach((f) => fd.append("files", f));
+  fd.append("batch", batch || "");
+  fd.append("wipe", wipe ? "true" : "false");
+  const r = await api.post("/ingest", fd, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "multipart/form-data",
+    },
+  });
   return r.data;
 }
 

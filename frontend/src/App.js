@@ -19,6 +19,7 @@ import Companies from "./pages/Companies";
 import Eligibility from "./pages/Eligibility";
 import Compare from "./pages/Compare";
 import CompanyDetail from "./pages/CompanyDetail";
+import Admin from "./pages/Admin";
 
 const THEME_KEY = "campus-theme";
 
@@ -296,6 +297,7 @@ function Footer() {
             <li><Link to="/eligibility" className="hover:text-signal">Eligibility Checker</Link></li>
             <li><Link to="/companies" className="hover:text-signal">Company Explorer</Link></li>
             <li><Link to="/compare" className="hover:text-signal">Company Compare</Link></li>
+            <li><Link to="/admin" className="hover:text-signal">Admin Console</Link></li>
           </ul>
         </div>
         <div>
@@ -337,6 +339,7 @@ function AnimatedRoutes() {
         <Route path="/companies" element={<Companies />} />
         <Route path="/companies/:id" element={<CompanyDetail />} />
         <Route path="/compare" element={<Compare />} />
+        <Route path="/admin" element={<Admin />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>
     </div>

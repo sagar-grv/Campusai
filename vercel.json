@@ -9,8 +9,11 @@
           "backend/server.py",
           "backend/security.py",
           "backend/gemini_client.py",
-          "backend/data/companies.json",
-          "backend/data/embedded_chunks_cache.json"
+          "backend/data/verified_seed.py",
+          "backend/data/branches.py",
+          "backend/data/verified_2025.json",
+          "backend/data/verified_2023_24.json",
+          "backend/ingest/parser.py"
         ]
       }
     },
