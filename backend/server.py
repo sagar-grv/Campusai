@@ -11,6 +11,7 @@ import uuid
 import asyncio
 import secrets
 import time
+import re
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -36,8 +37,16 @@ from security import (
     PER_ENDPOINT_LIMITS,
 )
 from ingest.parser import parse_placement_pdf
-from data.verified_seed import load_verified_seed, SEED_VERSION
+from data.emergent_seed import load_emergent_seed, SEED_VERSION
 from data.branches import normalize_branches, matches_allowed, canonical_for_tags
+from rag import (
+    tokenize,
+    score_company,
+    cgpa_min_from_string,
+    retrieve_relevant,
+    query_asks_about_backlogs,
+    allows_backlogs,
+)
 
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
@@ -321,7 +330,7 @@ async def _seed_verified_data():
             return
 
     try:
-        seed_records = load_verified_seed()
+        seed_records = load_emergent_seed()
         for rec in seed_records:
             rec["branches_canonical"] = normalize_branches(rec.get("branches") or "")
 
@@ -614,7 +623,7 @@ async def ingest_placement_pdf(
         filename = f.filename or "upload.pdf"
         is_known = any(k.lower() in filename.lower() for k in KNOWN_SEED_FILES)
         if is_known:
-            seed_records = load_verified_seed()
+            seed_records = load_emergent_seed()
             matched = [dict(r) for r in seed_records if (r.get("source_file") or "").lower() in filename.lower()]
             if matched:
                 result = {"file": filename, "parsed_count": len(matched), "expected_sr_max": len(matched)}
@@ -849,85 +858,100 @@ def sse(dict_payload: dict) -> str:
 
 
 async def build_chat_context(question: str, top_k: int):
-    """Shared retrieval for both the POST and streaming chat paths."""
-    ql = question.lower()
-    keyword_matches = []
+    """Shared retrieval for both the POST and streaming chat paths.
 
-    import re
-    num_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:lpa|ctc|lacs|lakh|lakhs)?', ql)
-    target_num = float(num_match.group(1)) if num_match else None
-    is_greater_query = any(k in ql for k in ["more", "above", "greater", "higher", ">", "at least", "min"])
-    is_highest_query = any(k in ql for k in ["highest", "max", "top", "best", "maximum"])
-    is_criteria_query = any(k in ql for k in ["%", "percent", "cgpa", "backlog", "percentage", "cutoff", "criteria", "eligibility"])
-
+    Primary signal: emergent lexical scoring (tokenize/score_company, with ctc in
+    the hay, word-boundary branch matching, backlog-policy awareness). Secondary
+    signal: Gemini embedding cosine over the placement chunk index. The response
+    contract (grounded/sources/matched_comps/session_id) is unchanged.
+    """
+    all_companies = []
     async for c in db.companies.find({}, {"_id": 0}):
-        comp_name = str(c.get("company") or "").lower()
-        role_name = str(c.get("role") or "").lower()
-        branches_name = str(c.get("branches") or "").lower()
-        elig_name = f"{c.get('eligibility') or ''} {c.get('cgpa') or ''}".lower()
-        ctc_float = _ctc_value(c)
+        all_companies.append(c)
 
-        if comp_name and comp_name in ql:
-            if c not in keyword_matches:
-                keyword_matches.append(c)
-        elif is_highest_query and ctc_float and ctc_float >= 15.0:
-            if c not in keyword_matches:
-                keyword_matches.append(c)
-        elif is_greater_query and target_num and ctc_float and ctc_float >= target_num:
-            if c not in keyword_matches:
-                keyword_matches.append(c)
-        elif is_criteria_query and target_num and (f"{int(target_num)}%" in elig_name or f"{target_num}" in elig_name):
-            if c not in keyword_matches and len(keyword_matches) < 8:
-                keyword_matches.append(c)
-        elif role_name and any(term in ql for term in role_name.split() if len(term) > 3):
-            if c not in keyword_matches and len(keyword_matches) < 6:
-                keyword_matches.append(c)
+    matched, fallback, grounded = retrieve_relevant(all_companies, question, top_k=top_k, fallback_n=6)
+    ranked = matched if matched else fallback
 
-    if is_greater_query or is_highest_query:
-        keyword_matches.sort(key=lambda x: _ctc_value(x) or 0, reverse=True)
-
-    q_vec = (await gemini.embed_many([question], task_type="RETRIEVAL_QUERY"))[0]
-    hits = []
-    async for doc in db.chunks.find({"type": "placement"}, {"text": 1, "source": 1, "embedding": 1, "company_data": 1}):
-        emb = doc.get("embedding")
-        if not emb or len(emb) != len(q_vec):
-            continue
-        score = cosine(q_vec, emb)
-        hits.append({
-            "text": doc["text"],
-            "source": doc.get("source", "placement_db"),
-            "score": score,
-            "company": (doc.get("company_data") or {}).get("company"),
-        })
-    hits.sort(key=lambda x: x["score"], reverse=True)
-    top = hits[: top_k]
-
-    grounded = (len(top) > 0 and top[0]["score"] >= 0.20) or len(keyword_matches) > 0
+    # Salary / ranking intent (e.g. "companies above 15 LPA", "highest paying"):
+    # re-rank the pool by CTC so the context is actually ordered by pay. This
+    # overrides lexical matches that happen to share tokens but aren't the answer.
+    ql = question.lower()
+    salary_intent = any(k in ql for k in ["highest", "max", "top", "best", "maximum",
+                                          "more", "above", "greater", "higher",
+                                          "at least", "min", "lpa", "ctc"])
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:lpa|ctc|lakh|lacs|lakhs)?", ql)
+    threshold = float(m.group(1)) if m else None
+    is_greater = salary_intent and threshold is not None and any(
+        k in ql for k in ["above", "greater", "more", "higher", "at least", "min", ">=", ">"])
+    if salary_intent and all_companies:
+        pool = all_companies
+        if is_greater and threshold is not None:
+            pool = [c for c in all_companies if _ctc_value(c) and _ctc_value(c) >= threshold]
+            if not pool:
+                pool = [c for c in all_companies if _ctc_value(c)]
+        elif any(k in ql for k in ["highest", "max", "top", "best", "maximum"]):
+            pool = [c for c in all_companies if _ctc_value(c)]
+        ranked = sorted(pool, key=lambda c: _ctc_value(c) or 0, reverse=True)
+        grounded = True
 
     context_parts = []
-    for i, h in enumerate(top):
-        context_parts.append(f"[Doc {i+1} | source={h['source']} | similarity={h['score']:.2f}]\n{h['text']}")
-    for km in keyword_matches[:6]:
+    sources = []
+    seen = set()
+    for c in ranked:
+        cname = str(c.get("company") or "")
+        key = (cname, c.get("batch"))
+        if key in seen:
+            continue
+        seen.add(key)
         context_parts.append(
-            f"[Structured Match | Company={km.get('company')}]\n"
-            f"Company: {km.get('company')}. Role: {km.get('role')}. CTC: {km.get('ctc')}. "
-            f"Branches: {km.get('branches')}. Eligibility: {km.get('eligibility') or km.get('cgpa')}. Notes: {km.get('notes')}."
+            f"[Doc {len(context_parts)+1} | source={c.get('source_file') or 'placement_db'}]\n"
+            f"Company: {cname}. Role: {c.get('role')}. CTC: {c.get('ctc')}. "
+            f"Branches: {c.get('branches')}. Eligibility: {c.get('eligibility') or c.get('cgpa')}. Notes: {c.get('notes')}."
         )
+        sources.append({"source": c.get("source_file") or "placement_db", "score": 0.0, "company": cname})
 
-    matched_comps = keyword_matches[:4]
-    if not matched_comps and top:
-        for h in top:
-            c_name = h.get("company")
-            if c_name:
-                comp_doc = await db.companies.find_one({"company": c_name}, {"_id": 0})
-                if comp_doc and comp_doc not in matched_comps:
-                    matched_comps.append(comp_doc)
-            if len(matched_comps) >= 3:
-                break
+    # Secondary: embedding similarity over chunks for semantic recall.
+    top_emb = []
+    if gemini and gemini.ready:
+        try:
+            q_vec = (await gemini.embed_many([question], task_type="RETRIEVAL_QUERY"))[0]
+            async for doc in db.chunks.find({"type": "placement"}, {"text": 1, "source": 1, "embedding": 1, "company_data": 1}):
+                emb = doc.get("embedding")
+                if not emb or len(emb) != len(q_vec):
+                    continue
+                score = cosine(q_vec, emb)
+                top_emb.append({
+                    "text": doc["text"],
+                    "source": doc.get("source", "placement_db"),
+                    "score": score,
+                    "company": (doc.get("company_data") or {}).get("company"),
+                })
+            top_emb.sort(key=lambda x: x["score"], reverse=True)
+            top_emb = top_emb[: top_k]
+            if top_emb and top_emb[0]["score"] >= 0.20:
+                grounded = True
+                for h in top_emb:
+                    context_parts.append(
+                        f"[Doc {len(context_parts)+1} | source={h['source']} | similarity={h['score']:.2f}]\n{h['text']}"
+                    )
+                    sources.append({"source": h["source"], "score": round(h["score"], 3), "company": h.get("company")})
+        except Exception as e:
+            print(f"[chat] embedding secondary signal skipped ({sanitize_log_message(str(e))})")
+
+    # Salary / ranking intent that may not tokenize onto the hay (e.g. "highest paying").
+    ql = question.lower()
+    if not grounded and any(k in ql for k in ["highest", "max", "top", "best", "maximum",
+                                              "more", "above", "greater", "higher", "at least", "min", "lpa", "ctc"]):
+        grounded = True
+
+    if salary_intent and all_companies:
+        matched_comps = [dict(c) for c in ranked[:4]]
+    else:
+        matched_comps = [dict(c) for c in matched[:4]] if matched else [dict(c) for c in fallback[:4]]
 
     return {
         "context": "\n\n".join(context_parts),
-        "sources": [{"source": h["source"], "score": round(h["score"], 3), "company": h["company"]} for h in top[:5]],
+        "sources": sources[:5],
         "grounded": grounded,
         "matched_comps": matched_comps,
         "session_id": str(uuid.uuid4()),
@@ -1017,120 +1041,6 @@ async def chat(body: ChatRequest, request: Request):
         grounded=True,
         session_id=ctx["session_id"],
         matched_companies=ctx["matched_comps"],
-    )
-
-    # 1. Structured Keyword & Numeric Matching over db.companies
-    ql = body.question.lower()
-    keyword_matches = []
-    
-    import re
-    num_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:lpa|ctc|lacs|lakh|lakhs)?', ql)
-    target_num = float(num_match.group(1)) if num_match else None
-    is_greater_query = any(k in ql for k in ["more", "above", "greater", "higher", ">", "at least", "min"])
-    is_highest_query = any(k in ql for k in ["highest", "max", "top", "best", "maximum"])
-    is_criteria_query = any(k in ql for k in ["%", "percent", "cgpa", "backlog", "percentage", "cutoff", "criteria", "eligibility"])
-
-    async for c in db.companies.find({}, {"_id": 0}):
-        comp_name = str(c.get("company") or "").lower()
-        role_name = str(c.get("role") or "").lower()
-        branches_name = str(c.get("branches") or "").lower()
-        elig_name = f"{c.get('eligibility') or ''} {c.get('cgpa') or ''}".lower()
-        ctc_float = _ctc_value(c)
-
-        if comp_name and comp_name in ql:
-            if c not in keyword_matches:
-                keyword_matches.append(c)
-        elif is_highest_query and ctc_float and ctc_float >= 15.0:
-            if c not in keyword_matches:
-                keyword_matches.append(c)
-        elif is_greater_query and target_num and ctc_float and ctc_float >= target_num:
-            if c not in keyword_matches:
-                keyword_matches.append(c)
-        elif is_criteria_query and target_num and (f"{int(target_num)}%" in elig_name or f"{target_num}" in elig_name):
-            if c not in keyword_matches and len(keyword_matches) < 8:
-                keyword_matches.append(c)
-        elif role_name and any(term in ql for term in role_name.split() if len(term) > 3):
-            if c not in keyword_matches and len(keyword_matches) < 6:
-                keyword_matches.append(c)
-
-    if is_greater_query or is_highest_query:
-        keyword_matches.sort(key=lambda x: _ctc_value(x) or 0, reverse=True)
-
-    # 2. Vector Embedding Search over db.chunks
-    q_vec = (await gemini.embed_many([body.question], task_type="RETRIEVAL_QUERY"))[0]
-    hits = []
-    async for doc in db.chunks.find({"type": "placement"}, {"text": 1, "source": 1, "embedding": 1, "company_data": 1}):
-        emb = doc.get("embedding")
-        if not emb or len(emb) != len(q_vec):
-            continue
-        score = cosine(q_vec, emb)
-        hits.append({
-            "text": doc["text"],
-            "source": doc.get("source", "placement_db"),
-            "score": score,
-            "company": (doc.get("company_data") or {}).get("company"),
-        })
-    hits.sort(key=lambda x: x["score"], reverse=True)
-    top = hits[: body.top_k]
-
-    # Grounding decision: Grounded if vector score >= 0.20 OR keyword matches found
-    grounded = (len(top) > 0 and top[0]["score"] >= 0.20) or len(keyword_matches) > 0
-
-    if not grounded:
-        return ChatResponse(
-            answer=(
-                "I don't have enough information in the placement database to answer that "
-                "confidently. Try asking about a specific company (e.g., 'What is Infosys "
-                "eligibility?') or a role (e.g., 'Which companies hire for Data Analyst?')."
-            ),
-            sources=[],
-            grounded=False,
-            session_id=body.session_id or str(uuid.uuid4()),
-            matched_companies=[],
-        )
-
-    # Build context from vector hits and keyword matches
-    context_parts = []
-    for i, h in enumerate(top):
-        context_parts.append(f"[Doc {i+1} | source={h['source']} | similarity={h['score']:.2f}]\n{h['text']}")
-
-    for km in keyword_matches[:6]:
-        context_parts.append(
-            f"[Structured Match | Company={km.get('company')}]\n"
-            f"Company: {km.get('company')}. Role: {km.get('role')}. CTC: {km.get('ctc')}. "
-            f"Branches: {km.get('branches')}. Eligibility: {km.get('eligibility') or km.get('cgpa')}. Notes: {km.get('notes')}."
-        )
-
-    context = "\n\n".join(context_parts)
-    system = (
-        "You are the Campus AI Placement Assistant for engineering college students in India. "
-        "Answer ONLY using the retrieved context below. Do NOT invent companies, salaries, "
-        "eligibility criteria, or dates. If the context does not contain the answer, reply "
-        "exactly: 'I don't have that information in the placement database.' "
-        "When you cite facts, add a small tag like [Doc N] pointing to the source. "
-        "Keep answers concise, structured with bullet points, and free of markdown headers."
-    )
-    prompt = f"CONTEXT:\n{context}\n\nSTUDENT QUESTION:\n{body.question}\n\nGrounded answer:"
-    answer = await gemini.generate(system=system, prompt=prompt, temperature=0.15, max_tokens=850)
-
-    # Prepare matched_companies array for rendering UI cards
-    matched_comps = keyword_matches[:4]
-    if not matched_comps and top:
-        for h in top:
-            c_name = h.get("company")
-            if c_name:
-                comp_doc = await db.companies.find_one({"company": c_name}, {"_id": 0})
-                if comp_doc and comp_doc not in matched_comps:
-                    matched_comps.append(comp_doc)
-            if len(matched_comps) >= 3:
-                break
-
-    return ChatResponse(
-        answer=answer,
-        sources=[{"source": h["source"], "score": round(h["score"], 3), "company": h["company"]} for h in top[:5]],
-        grounded=True,
-        session_id=body.session_id or str(uuid.uuid4()),
-        matched_companies=matched_comps,
     )
 
 
@@ -1322,9 +1232,10 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
                 is_eligible = False
                 reasons.append(f"Branch mismatch (Eligible: {c.get('branches') or 'Varies'})")
 
-        # 2. CGPA requirement check
-        cgpa_req = _extract_cgpa(elig_str)
-        if cgpa_req is not None and cgpa_req <= 10.0:
+        # 2. CGPA requirement check (emergent parser: prefers CGPA value over %/10
+        #    when criteria mix percentages and CGPA, e.g. "80%+ 10/12, 3.2 CGPA+" -> 3.2)
+        cgpa_req = cgpa_min_from_string(elig_str)
+        if cgpa_req and cgpa_req <= 10.0:
             if req.cgpa < cgpa_req:
                 is_eligible = False
                 reasons.append(f"CGPA below required cutoff ({req.cgpa} < {cgpa_req})")
@@ -1342,7 +1253,8 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
                 is_eligible = False
                 reasons.append("Company rejects candidates with active backlogs / KTs")
 
-        # Marginal band: ineligible only by a small/single criterion
+        # Marginal band: ineligible by only a single, small criterion (branch, CGPA,
+        # percentage, or backlog). Any single-reason near-miss is surfaced as marginal.
         is_marginal = False
         if not is_eligible and len(reasons) == 1:
             only = reasons[0]
@@ -1351,6 +1263,8 @@ async def check_eligibility(req: EligibilityRequest, request: Request):
             elif "Academic percentage below required" in only and pct_req is not None and (pct_req - min(req.tenth_pct, req.twelfth_pct)) <= 5.0:
                 is_marginal = True
             elif "backlogs / KTs" in only:
+                is_marginal = True
+            elif "Branch mismatch" in only:
                 is_marginal = True
 
         # Parse numeric CTC for stats
@@ -1447,17 +1361,6 @@ async def compare_companies(body: CompareRequest, request: Request):
 
 
 # ---------- helper functions ----------
-def _extract_cgpa(text: str) -> Optional[float]:
-    import re
-    m = re.search(r'(?:cgpa|cgpi)\s*(?:of|[-:\u2010-\u2015])?\s*([2-9]\.\d{1,2})', text)
-    if m:
-        try:
-            return float(m.group(1))
-        except ValueError:
-            pass
-    return None
-
-
 def _extract_pct(text: str) -> Optional[float]:
     import re
     m = re.search(r'(\d{2})%\s*(?:throughout|aggregate|and above|\+)', text)

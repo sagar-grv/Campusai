@@ -9,10 +9,11 @@
           "backend/server.py",
           "backend/security.py",
           "backend/gemini_client.py",
-          "backend/data/verified_seed.py",
+          "backend/rag.py",
+          "backend/data/emergent_seed.py",
           "backend/data/branches.py",
-          "backend/data/verified_2025.json",
-          "backend/data/verified_2023_24.json",
+          "backend/data/emergent_2025.json",
+          "backend/data/emergent_2023_24.json",
           "backend/ingest/parser.py"
         ]
       }
