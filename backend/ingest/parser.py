@@ -22,10 +22,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Union
 
-import pdfplumber
-
 ROLES = ("company", "date", "process", "branches", "criteria",
          "designation", "ctc_detail", "ctc")
+
+
+def _load_pdfplumber():
+    """Import pdfplumber lazily (kept optional at cold start)."""
+    try:
+        import pdfplumber
+        return pdfplumber
+    except Exception as e:  # pragma: no cover - depends on install
+        raise RuntimeError(f"pdfplumber unavailable: {e}") from e
 
 
 def now_iso() -> str:
@@ -287,6 +294,7 @@ def parse_placement_pdf(
     batch_override: str = "",
 ) -> dict:
     """Parse a placement PDF and return records plus parse statistics."""
+    pdfplumber = _load_pdfplumber()
     if isinstance(pdf_path_or_file, (str, os.PathLike)):
         source_file = source_file_name or os.path.basename(str(pdf_path_or_file))
         pdf = pdfplumber.open(str(pdf_path_or_file))
