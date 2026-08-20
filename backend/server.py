@@ -4,74 +4,91 @@ Campus AI - FastAPI backend
 - Resume vs JD Gap Analysis
 - Interview Prep generator
 """
-import os
-import io
-import json
-import uuid
-import asyncio
-import secrets
-import time
-import re
-import traceback
-from pathlib import Path
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import List, Optional
-
-# Try to import all modules, capture any import errors
-_import_error = None
+# Wrap everything in try/except to catch any module-level errors
 try:
-    from dotenv import load_dotenv
-    from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
-    from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import StreamingResponse, Response
-    from motor.motor_asyncio import AsyncIOMotorClient
-    from pydantic import BaseModel, Field
+    import os
+    import io
+    import json
+    import uuid
+    import asyncio
+    import secrets
+    import time
+    import re
+    import traceback
+    from pathlib import Path
+    from contextlib import asynccontextmanager
+    from datetime import datetime, timezone
+    from typing import List, Optional
 
-    from gemini_client import GeminiClient, EMBED_DIM
-    from security import (
-        rate_limiter,
-        check_prompt_injection,
-        check_domain_scope,
-        sanitize_log_message,
-        STRICT_SYSTEM_GUARDRAILS,
-        PER_ENDPOINT_LIMITS,
-    )
-    from data.emergent_seed import load_emergent_seed, SEED_VERSION
-    from data.branches import normalize_branches, matches_allowed, canonical_for_tags
-    from rag import (
-        tokenize,
-        score_company,
-        cgpa_min_from_string,
-        retrieve_relevant,
-        query_asks_about_backlogs,
-        allows_backlogs,
-    )
+    _import_error = None
+    try:
+        from dotenv import load_dotenv
+        from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
+        from fastapi.middleware.cors import CORSMiddleware
+        from fastapi.responses import StreamingResponse, Response
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from pydantic import BaseModel, Field
+
+        from gemini_client import GeminiClient, EMBED_DIM
+        from security import (
+            rate_limiter,
+            check_prompt_injection,
+            check_domain_scope,
+            sanitize_log_message,
+            STRICT_SYSTEM_GUARDRAILS,
+            PER_ENDPOINT_LIMITS,
+        )
+        from data.emergent_seed import load_emergent_seed, SEED_VERSION
+        from data.branches import normalize_branches, matches_allowed, canonical_for_tags
+        from rag import (
+            tokenize,
+            score_company,
+            cgpa_min_from_string,
+            retrieve_relevant,
+            query_asks_about_backlogs,
+            allows_backlogs,
+        )
+    except Exception as e:
+        _import_error = f"Import error: {e}\n{traceback.format_exc()}"
+
+    ROOT = Path(__file__).parent
+    try:
+        load_dotenv(ROOT / ".env")
+    except Exception:
+        pass
+
 except Exception as e:
-    _import_error = f"Import error: {e}\n{traceback.format_exc()}"
+    _import_error = f"Module init error: {e}\n{traceback.format_exc()}"
 
-ROOT = Path(__file__).parent
-try:
-    load_dotenv(ROOT / ".env")
-except Exception:
-    pass
+# If we get here with an import error, define minimal FastAPI for health endpoint
+if '_import_error' in globals() and _import_error:
+    from fastapi import FastAPI
+    app = FastAPI()
+    @app.get("/api/health")
+    async def health():
+        return {"ok": False, "error": "Module init failed", "detail": _import_error}
+else:
+    MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+    DB_NAME = os.environ.get("DB_NAME", "campus_ai")
+    CORS = os.environ.get("CORS_ORIGINS", "*")
+    ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change_me")
+    ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change_me_to_a_long_random_string")
 
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = os.environ.get("DB_NAME", "campus_ai")
-CORS = os.environ.get("CORS_ORIGINS", "*")
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change_me")
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "change_me_to_a_long_random_string")
+    mongo: Optional[AsyncIOMotorClient] = None
+    db = None
+    gemini: Optional[GeminiClient] = None
+    DB_MODE = "mock"
+    _embed_mutex = asyncio.Lock()
 
-mongo: Optional[AsyncIOMotorClient] = None
-db = None
-gemini: Optional[GeminiClient] = None
-DB_MODE = "mock"
-_embed_mutex = asyncio.Lock()
+    # Redis client (Upstash serverless) - optional import
+    try:
+        from upstash_redis import Redis
+    except ImportError:
+        Redis = None
 
-# Redis client (Upstash serverless)
-redis: Optional[Redis] = None
-_redis_available = False
+    redis: Optional[Redis] = None
+    _redis_available = False
 
 
 # ---------- utilities ----------
