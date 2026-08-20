@@ -12,40 +12,49 @@ import asyncio
 import secrets
 import time
 import re
+import traceback
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response
-from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field
+# Try to import all modules, capture any import errors
+_import_error = None
+try:
+    from dotenv import load_dotenv
+    from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import StreamingResponse, Response
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from pydantic import BaseModel, Field
 
-from gemini_client import GeminiClient, EMBED_DIM
-from security import (
-    rate_limiter,
-    check_prompt_injection,
-    check_domain_scope,
-    sanitize_log_message,
-    STRICT_SYSTEM_GUARDRAILS,
-    PER_ENDPOINT_LIMITS,
-)
-from data.emergent_seed import load_emergent_seed, SEED_VERSION
-from data.branches import normalize_branches, matches_allowed, canonical_for_tags
-from rag import (
-    tokenize,
-    score_company,
-    cgpa_min_from_string,
-    retrieve_relevant,
-    query_asks_about_backlogs,
-    allows_backlogs,
-)
+    from gemini_client import GeminiClient, EMBED_DIM
+    from security import (
+        rate_limiter,
+        check_prompt_injection,
+        check_domain_scope,
+        sanitize_log_message,
+        STRICT_SYSTEM_GUARDRAILS,
+        PER_ENDPOINT_LIMITS,
+    )
+    from data.emergent_seed import load_emergent_seed, SEED_VERSION
+    from data.branches import normalize_branches, matches_allowed, canonical_for_tags
+    from rag import (
+        tokenize,
+        score_company,
+        cgpa_min_from_string,
+        retrieve_relevant,
+        query_asks_about_backlogs,
+        allows_backlogs,
+    )
+except Exception as e:
+    _import_error = f"Import error: {e}\n{traceback.format_exc()}"
 
 ROOT = Path(__file__).parent
-load_dotenv(ROOT / ".env")
+try:
+    load_dotenv(ROOT / ".env")
+except Exception:
+    pass
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "campus_ai")
@@ -569,6 +578,13 @@ app.add_middleware(
 # ---------- routes ----------
 @app.get("/api/health")
 async def health():
+    # Check for import errors first
+    if '_import_error' in globals() and _import_error:
+        return {
+            "ok": False,
+            "error": "Module import failed",
+            "detail": _import_error,
+        }
     import traceback
     error_detail = None
     ok = True

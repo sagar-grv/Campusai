@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "backend/server_minimal.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": [
+          "backend/server_minimal.py"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "backend/server_minimal.py"
+    }
+  ]
+}
