@@ -38,7 +38,11 @@ export function localStorageProvider() {
 }
 
 export function useCompanies(params) {
-  const key = `/companies?${new URLSearchParams(params).toString()}`;
+  const q = {};
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") q[k] = v;
+  });
+  const key = `/companies?${new URLSearchParams(q).toString()}`;
   return useSWR(key, fetcher, { revalidateOnFocus: false, dedupingInterval: 2000 });
 }
 
