@@ -5,13 +5,12 @@ import asyncio
 import urllib.request
 from typing import List, Optional
 
-import numpy as np
-
 
 EMBED_DIM = int(os.environ.get("EMBED_DIM", "768"))
 
 
 def _normalize(vec: List[float]) -> List[float]:
+    import numpy as np
     a = np.asarray(vec, dtype=np.float32)
     n = float(np.linalg.norm(a))
     if n == 0:
