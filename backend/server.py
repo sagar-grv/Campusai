@@ -21,11 +21,12 @@ import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from docx import Document as DocxDocument
+from upstash_redis import Redis
 
 from gemini_client import GeminiClient, EMBED_DIM
 from security import (
@@ -63,6 +64,10 @@ db = None
 gemini: Optional[GeminiClient] = None
 DB_MODE = "mock"
 _embed_mutex = asyncio.Lock()
+
+# Redis client (Upstash serverless)
+redis: Optional[Redis] = None
+_redis_available = False
 
 
 # ---------- utilities ----------
@@ -203,7 +208,7 @@ def parse_resume(filename: str, content: bytes) -> str:
 
 # ---------- initialization ----------
 async def ensure_initialized():
-    global mongo, db, gemini, DB_MODE
+    global mongo, db, gemini, DB_MODE, redis, _redis_available
     if gemini is None:
         try:
             gemini = GeminiClient()
@@ -227,11 +232,39 @@ async def ensure_initialized():
                 mongo = None
         if mongo:
             db = mongo[DB_NAME]
+    
+    # Initialize Redis client
+    if redis is None:
+        redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
+        redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+        if redis_url and redis_token:
+            try:
+                redis = Redis(url=redis_url, token=redis_token)
+                _redis_available = True
+                print("[redis] Upstash Redis client initialized.")
+            except Exception as e:
+                print(f"[redis] initialization failed: {e}")
+                _redis_available = False
+        else:
+            _redis_available = False
+            print("[redis] UPSTASH env vars not set; caching disabled.")
+    
     if db is not None:
         try:
             await _seed_verified_data()
         except Exception as e:
             print(f"[db] verified-seed error: {sanitize_log_message(str(e))}")
+        try:
+            await db.companies.create_index([
+                ("company", "text"), ("role", "text"),
+                ("branches", "text"), ("eligibility", "text")
+            ])
+            await db.companies.create_index("batch")
+            await db.companies.create_index("ctc_lpa")
+            await db.companies.create_index([("company", 1), ("batch", 1)])
+            print("[db] Indexes ensured on companies collection.")
+        except Exception as e:
+            print(f"[db] index creation skipped: {sanitize_log_message(str(e))}")
 
 
 def _build_records_documents(all_records: list) -> list:
@@ -266,6 +299,133 @@ def _build_records_documents(all_records: list) -> list:
             "created_at": now_iso(),
         })
     return documents
+
+
+# ---------- Redis cache helpers ----------
+CACHE_TTL = 300  # 5 minutes
+
+
+def _cache_get(key: str) -> Optional[dict]:
+    """Get cached value from Redis. Returns None on miss or if Redis unavailable."""
+    if not _redis_available or redis is None:
+        return None
+    try:
+        data = redis.get(key)
+        if data:
+            return json.loads(data)
+    except Exception as e:
+        print(f"[redis] GET {key} failed: {sanitize_log_message(str(e))}")
+    return None
+
+
+def _cache_set(key: str, value: dict) -> bool:
+    """Set cached value in Redis with TTL. Returns True on success."""
+    if not _redis_available or redis is None:
+        return False
+    try:
+        redis.set(key, json.dumps(value), ex=CACHE_TTL)
+        return True
+    except Exception as e:
+        print(f"[redis] SET {key} failed: {sanitize_log_message(str(e))}")
+        return False
+
+
+def _cache_delete(key: str) -> bool:
+    """Delete cached value from Redis. Returns True on success."""
+    if not _redis_available or redis is None:
+        return False
+    try:
+        redis.delete(key)
+        return True
+    except Exception as e:
+        print(f"[redis] DEL {key} failed: {sanitize_log_message(str(e))}")
+        return False
+
+
+def _invalidate_stats_cache():
+    """Invalidate both stats cache keys."""
+    _cache_delete("stats:companies")
+    _cache_delete("stats:dashboard")
+
+
+async def _compute_companies_stats() -> dict:
+    """Compute companies stats without caching. Used for pre-computation on seed."""
+    total = await db.companies.count_documents({})
+    ctc_values = []
+    by_batch = {}
+    top_recruiters = {}
+    top_roles = {}
+    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "batch": 1, "_id": 0}):
+        v = _ctc_value(c)
+        if v is not None:
+            ctc_values.append(v)
+        b = batch_of(c)
+        by_batch[b] = by_batch.get(b, 0) + 1
+        name = str(c.get("company") or "").strip()
+        if name:
+            top_recruiters[name] = top_recruiters.get(name, 0) + 1
+        r = (c.get("role") or "").split(",")[0].strip()[:40]
+        if r:
+            top_roles[r] = top_roles.get(r, 0) + 1
+    top_roles_sorted = sorted(top_roles.items(), key=lambda x: -x[1])[:6]
+    top_recruiters_sorted = sorted(top_recruiters.items(), key=lambda x: -x[1])[:8]
+    return {
+        "total_companies": total,
+        "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
+        "max_ctc_lpa": round(max(ctc_values), 2) if ctc_values else 0,
+        "by_batch": [{"batch": b, "count": n} for b, n in sorted(by_batch.items())],
+        "top_recruiters": [{"company": c, "count": n} for c, n in top_recruiters_sorted],
+        "top_roles": [{"role": r, "count": n} for r, n in top_roles_sorted],
+    }
+
+
+async def _compute_dashboard_stats() -> dict:
+    """Compute dashboard stats without caching. Used for pre-computation on seed."""
+    total = await db.companies.count_documents({})
+    ctc_values = []
+    ctc_buckets = {"0-5": 0, "5-10": 0, "10-15": 0, "15-20": 0, "20+": 0}
+    by_batch = {}
+    top_recruiters = {}
+    top_roles = {}
+    branch_counts = {}
+    async for c in db.companies.find({}, {"ctc": 1, "ctc_lpa": 1, "role": 1, "company": 1, "source_file": 1, "branches": 1, "branches_canonical": 1, "batch": 1, "_id": 0}):
+        v = _ctc_value(c)
+        if v is not None:
+            ctc_values.append(v)
+            if v < 5:
+                ctc_buckets["0-5"] += 1
+            elif v < 10:
+                ctc_buckets["5-10"] += 1
+            elif v < 15:
+                ctc_buckets["10-15"] += 1
+            elif v < 20:
+                ctc_buckets["15-20"] += 1
+            else:
+                ctc_buckets["20+"] += 1
+        b = batch_of(c)
+        by_batch[b] = by_batch.get(b, 0) + 1
+        name = str(c.get("company") or "").strip()
+        if name:
+            top_recruiters[name] = top_recruiters.get(name, 0) + 1
+        r = (c.get("role") or "").split(",")[0].strip()[:40]
+        if r:
+            top_roles[r] = top_roles.get(r, 0) + 1
+        canon = str(c.get("branches_canonical") or normalize_branches(c.get("branches") or "") or "")
+        if canon and canon != "ALL":
+            for tag in canon.split(","):
+                tag = tag.strip()
+                if tag:
+                    branch_counts[tag] = branch_counts.get(tag, 0) + 1
+    return {
+        "total_companies": total,
+        "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
+        "max_ctc_lpa": round(max(ctc_values), 2) if ctc_values else 0,
+        "by_batch": [{"batch": b, "count": n} for b, n in sorted(by_batch.items())],
+        "top_recruiters": [{"company": c, "count": n} for c, n in sorted(top_recruiters.items(), key=lambda x: -x[1])[:8]],
+        "top_roles": [{"role": r, "count": n} for r, n in sorted(top_roles.items(), key=lambda x: -x[1])[:6]],
+        "ctc_buckets": [{"range": k, "count": v} for k, v in ctc_buckets.items()],
+        "branch_coverage": [{"branch": b, "count": n} for b, n in sorted(branch_counts.items(), key=lambda x: -x[1])[:6]],
+    }
 
 
 async def _seed_verified_data():
@@ -362,6 +522,17 @@ async def _seed_verified_data():
                           "chunks": len(documents), "embedded": embedded}},
                 upsert=True,
             )
+            
+            # Pre-compute and cache stats after seeding
+            try:
+                companies_stats_data = await _compute_companies_stats()
+                dashboard_stats_data = await _compute_dashboard_stats()
+                _cache_set("stats:companies", companies_stats_data)
+                _cache_set("stats:dashboard", dashboard_stats_data)
+                print("[seed] Pre-computed and cached stats.")
+            except Exception as e:
+                print(f"[seed] stats pre-compute failed: {sanitize_log_message(str(e))}")
+            
             print(f"[seed] Seeded verified dataset: {len(seed_records)} companies, {len(documents)} chunks "
                   f"(embedded={embedded}).")
     finally:
@@ -680,6 +851,9 @@ async def ingest_placement_pdf(
     )
     print(f"[ingest] Done. {len(all_records)} companies, {len(documents)} chunks.")
 
+    # Invalidate stats cache after data change
+    _invalidate_stats_cache()
+
     return {
         "files_processed": len(per_file),
         "companies_inserted": len(all_records),
@@ -715,38 +889,93 @@ async def list_companies(
     await ensure_initialized()
     page = max(1, page)
     page_size = min(100, max(1, page_size))
-    cursor = db.companies.find({}, {"_id": 0})
-    docs = await cursor.to_list(length=1000)
+
+    # Build MongoDB filter
+    filter_query = {}
+
+    # Text search: use $text for real MongoDB, regex fallback for mock
     if q:
-        ql = q.lower()
-        docs = [d for d in docs if any(
-            ql in str(d.get(k, "")).lower() for k in ("company", "role", "branches", "eligibility")
-        )]
+        if DB_MODE == "real":
+            filter_query["$text"] = {"$search": q}
+        else:
+            # mongomock doesn't support $text; use regex on searchable fields
+            ql = q.lower()
+            filter_query["$or"] = [
+                {"company": {"$regex": ql, "$options": "i"}},
+                {"role": {"$regex": ql, "$options": "i"}},
+                {"branches": {"$regex": ql, "$options": "i"}},
+                {"eligibility": {"$regex": ql, "$options": "i"}},
+            ]
+
+    # Batch filter: direct field match
     if batch:
-        docs = [d for d in docs if batch_of(d) == batch]
+        filter_query["batch"] = batch
+
+    # Branch filter: translate matches_allowed logic to MongoDB
     if branch:
-        docs = [d for d in docs if matches_allowed(
-            str(d.get("branches_canonical") or normalize_branches(d.get("branches") or "") or ""),
-            canonical_for_tags([branch]),
-        )]
+        user_canonical = canonical_for_tags([branch])
+        if user_canonical:
+            user_tag = user_canonical[0]
+            branch_filter = {
+                "$or": [
+                    {"branches_canonical": {"$in": ["", "ALL"]}},
+                    {"$and": [
+                        {"branches_canonical": {"$regex": "^ALL EXCEPT "}},
+                        {"branches_canonical": {"$not": {"$regex": f"(^|,){user_tag}(,|$)"}}},
+                    ]},
+                    {"branches_canonical": {"$regex": f"(^|,){user_tag}(,|$)"}},
+                ]
+            }
+            if "$or" in filter_query:
+                # Combine with existing $or (from text search in mock mode)
+                filter_query = {"$and": [filter_query, branch_filter]}
+            else:
+                filter_query.update(branch_filter)
+
+    # Min CTC filter: use ctc_lpa field
     if min_ctc and min_ctc > 0:
-        docs = [d for d in docs if (_ctc_value(d) or 0) >= min_ctc]
+        filter_query["ctc_lpa"] = {"$gte": min_ctc}
+
+    # Build sort specification
+    sort_spec = []
     if sort == "ctc_desc":
-        docs.sort(key=lambda x: _ctc_value(x) or 0, reverse=True)
+        sort_spec = [("ctc_lpa", -1)]
     elif sort == "ctc_asc":
-        docs.sort(key=lambda x: _ctc_value(x) or 0)
+        sort_spec = [("ctc_lpa", 1)]
     elif sort in ("name", "name_asc"):
-        docs.sort(key=lambda x: str(x.get("company") or "").lower())
-    total = len(docs)
-    start = (page - 1) * page_size
+        sort_spec = [("company", 1)]
+    else:
+        # Default sort by company name for consistent pagination
+        sort_spec = [("company", 1)]
+
+    # Get total count with same filter
+    total = await db.companies.count_documents(filter_query)
+
+    # Fetch paginated results
+    skip = (page - 1) * page_size
+    cursor = db.companies.find(filter_query, {"_id": 0})
+    if sort_spec:
+        cursor = cursor.sort(sort_spec)
+    docs = await cursor.skip(skip).limit(page_size).to_list(length=page_size)
+
     client_ip = request.client.host if request and request.client else "127.0.0.1"
     asyncio.create_task(record_usage("companies_view", client_ip, _visitor_id(request, client_ip)))
-    return {"companies": docs[start:start + page_size], "total": total, "page": page, "page_size": page_size}
+    return {"companies": docs, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/companies/stats")
 async def companies_stats():
     await ensure_initialized()
+    
+    # Try cache first
+    cached = _cache_get("stats:companies")
+    if cached is not None:
+        return Response(
+            content=json.dumps(cached),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+        )
+    
     total = await db.companies.count_documents({})
     ctc_values = []
     by_batch = {}
@@ -766,7 +995,7 @@ async def companies_stats():
             top_roles[r] = top_roles.get(r, 0) + 1
     top_roles_sorted = sorted(top_roles.items(), key=lambda x: -x[1])[:6]
     top_recruiters_sorted = sorted(top_recruiters.items(), key=lambda x: -x[1])[:8]
-    return {
+    data = {
         "total_companies": total,
         "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
         "max_ctc_lpa": round(max(ctc_values), 2) if ctc_values else 0,
@@ -774,11 +1003,30 @@ async def companies_stats():
         "top_recruiters": [{"company": c, "count": n} for c, n in top_recruiters_sorted],
         "top_roles": [{"role": r, "count": n} for r, n in top_roles_sorted],
     }
+    
+    # Store in cache
+    _cache_set("stats:companies", data)
+    
+    return Response(
+        content=json.dumps(data),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+    )
 
 
 @app.get("/api/dashboard")
 async def dashboard_stats(request: Request = None):
     await ensure_initialized()
+    
+    # Try cache first
+    cached = _cache_get("stats:dashboard")
+    if cached is not None:
+        return Response(
+            content=json.dumps(cached),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+        )
+    
     total = await db.companies.count_documents({})
     ctc_values = []
     ctc_buckets = {"0-5": 0, "5-10": 0, "10-15": 0, "15-20": 0, "20+": 0}
@@ -816,7 +1064,7 @@ async def dashboard_stats(request: Request = None):
                     branch_counts[tag] = branch_counts.get(tag, 0) + 1
     client_ip = request.client.host if request and request.client else "127.0.0.1"
     asyncio.create_task(record_usage("dashboard", client_ip, _visitor_id(request, client_ip)))
-    return {
+    data = {
         "total_companies": total,
         "avg_ctc_lpa": round(sum(ctc_values) / len(ctc_values), 2) if ctc_values else 0,
         "max_ctc_lpa": round(max(ctc_values), 2) if ctc_values else 0,
@@ -826,6 +1074,15 @@ async def dashboard_stats(request: Request = None):
         "ctc_buckets": [{"range": k, "count": v} for k, v in ctc_buckets.items()],
         "branch_coverage": [{"branch": b, "count": n} for b, n in sorted(branch_counts.items(), key=lambda x: -x[1])[:6]],
     }
+    
+    # Store in cache
+    _cache_set("stats:dashboard", data)
+    
+    return Response(
+        content=json.dumps(data),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+    )
 
 
 @app.get("/api/stats")

@@ -16,7 +16,7 @@ import {
   GraduationCap,
   MessageSquare,
 } from "lucide-react";
-import { getDashboard } from "../lib/api";
+import { useDashboard } from "../lib/swr";
 import { CountUp, FadeUp, Stagger, StaggerItem } from "../components/motion";
 
 const TOOLTIP_STYLE = {
@@ -63,29 +63,14 @@ const MODULES = [
 ];
 
 export default function Dashboard() {
-  const [data, setData] = React.useState(null);
-  const [error, setError] = React.useState(false);
+  const { data, error, isLoading } = useDashboard();
   const [reduced] = React.useState(
     () =>
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 
-  React.useEffect(() => {
-    let alive = true;
-    getDashboard()
-      .then((d) => {
-        if (alive) setData(d);
-      })
-      .catch(() => {
-        if (alive) setError(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const loading = !data && !error;
+  const loading = isLoading;
   const anim = !reduced;
 
   const byBatch = data?.by_batch ?? [];

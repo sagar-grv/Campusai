@@ -191,3 +191,5 @@ export async function ingestCompanies(token, files, batch, wipe) {
   return r.data;
 }
 
+export { useChat } from "./swr";
+

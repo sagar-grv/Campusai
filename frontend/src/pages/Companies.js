@@ -12,7 +12,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { listCompanies, getStats } from "../lib/api";
+import { useCompanies, useStats } from "../lib/swr";
 import { CountUp } from "../components/motion";
 
 const BATCHES = ["", "2023-24", "2025"];
@@ -26,10 +26,7 @@ const SORTS = [
 const PAGE_SIZES = [25, 50, 100];
 
 export default function Companies() {
-  const [companies, setCompanies] = React.useState([]);
-  const [stats, setStats] = React.useState(null);
   const [query, setQuery] = React.useState("");
-  const [loading, setLoading] = React.useState(true);
   const [expanded, setExpanded] = React.useState(null);
   const [batch, setBatch] = React.useState("");
   const [branch, setBranch] = React.useState("");
@@ -37,42 +34,28 @@ export default function Companies() {
   const [sort, setSort] = React.useState("");
   const [pageSize, setPageSize] = React.useState(25);
   const [page, setPage] = React.useState(1);
-  const [total, setTotal] = React.useState(0);
   const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   const queryRef = React.useRef("");
   const filterRef = React.useRef({ batch: "", branch: "", minCtc: "", sort: "", pageSize: 25 });
 
-  const fetchCompanies = React.useCallback(async (opts) => {
-    setLoading(true);
-    try {
-      const res = await listCompanies(opts);
-      setCompanies(res.companies || []);
-      setTotal(res.total ?? res.companies?.length ?? 0);
-    } catch (err) {
-      toast.error("Failed to load companies.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const params = {
+    q: queryRef.current,
+    batch: filterRef.current.batch,
+    branch: filterRef.current.branch,
+    min_ctc: filterRef.current.minCtc,
+    sort: filterRef.current.sort,
+    page: page,
+    page_size: filterRef.current.pageSize,
+  };
 
-  const applyFilters = React.useCallback(
-    (p = 1) => {
-      setPage(p);
-      fetchCompanies({
-        q: queryRef.current,
-        ...filterRef.current,
-        page: p,
-        page_size: filterRef.current.pageSize,
-      });
-    },
-    [fetchCompanies]
-  );
+  const { data: companiesData, error: companiesError, isLoading: companiesLoading, mutate: mutateCompanies } = useCompanies(params);
+  const { data: statsData, error: statsError, isLoading: statsLoading } = useStats();
 
-  React.useEffect(() => {
-    applyFilters();
-    getStats().then(setStats).catch(() => {});
-  }, [applyFilters]);
+  const companies = companiesData?.companies || [];
+  const total = companiesData?.total ?? companies?.length ?? 0;
+  const stats = statsData;
+  const loading = companiesLoading || statsLoading;
 
   function setFilter(key, value) {
     filterRef.current = { ...filterRef.current, [key]: value };
@@ -83,7 +66,22 @@ export default function Companies() {
     setQuery(val);
     queryRef.current = val;
     clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => applyFilters(1), 350);
+    timerRef.current = setTimeout(() => {
+      setPage(1);
+    }, 350);
+  }
+
+  function handleFilterChange(setter, key, val) {
+    setter(val);
+    setFilter(key, val);
+    setPage(1);
+  }
+
+  function handlePageSize(val) {
+    const size = Number(val);
+    setPageSize(size);
+    setFilter("pageSize", size);
+    setPage(1);
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -91,19 +89,6 @@ export default function Companies() {
   const activeFilterCount =
     [filterRef.current.batch, filterRef.current.branch, filterRef.current.minCtc, filterRef.current.sort].filter(Boolean)
       .length + (filterRef.current.pageSize !== 25 ? 1 : 0);
-
-  function handlePageSize(val) {
-    const size = Number(val);
-    setPageSize(size);
-    setFilter("pageSize", size);
-    applyFilters(1);
-  }
-
-  function handleFilterChange(setter, key, val) {
-    setter(val);
-    setFilter(key, val);
-    applyFilters(1);
-  }
 
   return (
     <div
@@ -256,9 +241,9 @@ export default function Companies() {
           onChange={(e) => handleSearch(e.target.value)}
           data-testid="company-search"
         />
-        <span className="shrink-0 font-mono text-[10px] text-subtle">
-          {total || companies.length} results
-        </span>
+<span className="shrink-0 font-mono text-[10px] text-subtle">
+            {total} results
+          </span>
       </div>
 
       {/* Company list */}
@@ -471,7 +456,7 @@ export default function Companies() {
                 <button
                   className="btn-outline min-h-[44px] !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
                   disabled={page <= 1}
-                  onClick={() => applyFilters(page - 1)}
+                  onClick={() => setPage(page - 1)}
                   data-testid="pagination-prev"
                 >
                   ← Prev
@@ -479,7 +464,7 @@ export default function Companies() {
                 <button
                   className="btn-outline min-h-[44px] !py-2 !px-4 text-sm disabled:pointer-events-none disabled:opacity-40"
                   disabled={page >= totalPages}
-                  onClick={() => applyFilters(page + 1)}
+                  onClick={() => setPage(page + 1)}
                   data-testid="pagination-next"
                 >
                   Next →

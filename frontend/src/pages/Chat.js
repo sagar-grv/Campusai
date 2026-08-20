@@ -2,7 +2,7 @@ import React from "react";
 import { toast } from "sonner";
 import { Send, Sparkles, RotateCw, MessageSquare, ChevronDown } from "lucide-react";
 import { motion } from "motion/react";
-import { chatAsk, streamChat } from "../lib/api";
+import { streamChat, chatAsk, useChat } from "../lib/api";
 import FormattedMarkdown from "../components/FormattedMarkdown";
 import { EASE, Stagger, StaggerItem } from "../components/motion";
 
