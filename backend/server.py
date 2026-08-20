@@ -26,7 +26,14 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from docx import Document as DocxDocument
-from upstash_redis import Redis
+
+# Optional: Upstash Redis (graceful fallback if not available)
+try:
+    from upstash_redis import Redis
+    _UPSTASH_AVAILABLE = True
+except ImportError:
+    Redis = None
+    _UPSTASH_AVAILABLE = False
 
 from gemini_client import GeminiClient, EMBED_DIM
 from security import (
@@ -234,7 +241,7 @@ async def ensure_initialized():
             db = mongo[DB_NAME]
     
     # Initialize Redis client
-    if redis is None:
+    if redis is None and _UPSTASH_AVAILABLE:
         redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
         redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
         if redis_url and redis_token:
@@ -247,6 +254,12 @@ async def ensure_initialized():
                 _redis_available = False
         else:
             _redis_available = False
+            print("[redis] UPSTASH env vars not set; caching disabled.")
+    else:
+        _redis_available = False
+        if not _UPSTASH_AVAILABLE:
+            print("[redis] upstash_redis not installed; caching disabled.")
+        else:
             print("[redis] UPSTASH env vars not set; caching disabled.")
     
     if db is not None:
