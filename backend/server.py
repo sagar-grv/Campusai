@@ -570,8 +570,14 @@ app.add_middleware(
 # ---------- routes ----------
 @app.get("/api/health")
 async def health():
-    await ensure_initialized()
+    import traceback
+    error_detail = None
     ok = True
+    try:
+        await ensure_initialized()
+    except Exception as e:
+        ok = False
+        error_detail = f"init error: {e}\n{traceback.format_exc()}"
     try:
         if mongo and hasattr(mongo, "admin"):
             await mongo.admin.command("ping")
@@ -589,6 +595,7 @@ async def health():
         "embed_model": os.environ.get("EMBED_MODEL", "gemini-embedding-001"),
         "gemini_ready": gemini is not None and (gemini.ready or bool(os.environ.get("NVIDIA_API_KEY"))),
         "companies_seeded": bool(seed),
+        "error": error_detail,
     }
 
 

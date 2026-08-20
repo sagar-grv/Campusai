@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "backend/test_minimal.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": [
+          "backend/test_minimal.py"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "backend/test_minimal.py"
+    }
+  ]
+}
