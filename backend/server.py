@@ -27,14 +27,6 @@ from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 
-# Optional: Upstash Redis (graceful fallback if not available)
-try:
-    from upstash_redis import Redis
-    _UPSTASH_AVAILABLE = True
-except ImportError:
-    Redis = None
-    _UPSTASH_AVAILABLE = False
-
 from gemini_client import GeminiClient, EMBED_DIM
 from security import (
     rate_limiter,
@@ -215,7 +207,7 @@ def parse_resume(filename: str, content: bytes) -> str:
 
 # ---------- initialization ----------
 async def ensure_initialized():
-    global mongo, db, gemini, DB_MODE, redis, _redis_available
+    global mongo, db, gemini, DB_MODE, _redis_available
     if gemini is None:
         try:
             gemini = GeminiClient()
@@ -240,27 +232,8 @@ async def ensure_initialized():
         if mongo:
             db = mongo[DB_NAME]
     
-    # Initialize Redis client
-    if redis is None and _UPSTASH_AVAILABLE:
-        redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
-        redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-        if redis_url and redis_token:
-            try:
-                redis = Redis(url=redis_url, token=redis_token)
-                _redis_available = True
-                print("[redis] Upstash Redis client initialized.")
-            except Exception as e:
-                print(f"[redis] initialization failed: {e}")
-                _redis_available = False
-        else:
-            _redis_available = False
-            print("[redis] UPSTASH env vars not set; caching disabled.")
-    else:
-        _redis_available = False
-        if not _UPSTASH_AVAILABLE:
-            print("[redis] upstash_redis not installed; caching disabled.")
-        else:
-            print("[redis] UPSTASH env vars not set; caching disabled.")
+    # Initialize Redis client (disabled - using in-memory cache)
+    _redis_available = False
     
     if db is not None:
         try:
@@ -314,45 +287,35 @@ def _build_records_documents(all_records: list) -> list:
     return documents
 
 
-# ---------- Redis cache helpers ----------
+# ---------- In-memory cache helpers ----------
 CACHE_TTL = 300  # 5 minutes
+_cache_store = {}  # key -> (value, expiry_timestamp)
 
 
 def _cache_get(key: str) -> Optional[dict]:
-    """Get cached value from Redis. Returns None on miss or if Redis unavailable."""
-    if not _redis_available or redis is None:
+    """Get cached value from in-memory store. Returns None on miss or expired."""
+    entry = _cache_store.get(key)
+    if entry is None:
         return None
-    try:
-        data = redis.get(key)
-        if data:
-            return json.loads(data)
-    except Exception as e:
-        print(f"[redis] GET {key} failed: {sanitize_log_message(str(e))}")
-    return None
+    value, expiry = entry
+    if time.time() > expiry:
+        del _cache_store[key]
+        return None
+    return value
 
 
 def _cache_set(key: str, value: dict) -> bool:
-    """Set cached value in Redis with TTL. Returns True on success."""
-    if not _redis_available or redis is None:
-        return False
-    try:
-        redis.set(key, json.dumps(value), ex=CACHE_TTL)
-        return True
-    except Exception as e:
-        print(f"[redis] SET {key} failed: {sanitize_log_message(str(e))}")
-        return False
+    """Set cached value in memory with TTL. Returns True on success."""
+    _cache_store[key] = (value, time.time() + CACHE_TTL)
+    return True
 
 
 def _cache_delete(key: str) -> bool:
-    """Delete cached value from Redis. Returns True on success."""
-    if not _redis_available or redis is None:
-        return False
-    try:
-        redis.delete(key)
+    """Delete cached value from memory. Returns True if key existed."""
+    if key in _cache_store:
+        del _cache_store[key]
         return True
-    except Exception as e:
-        print(f"[redis] DEL {key} failed: {sanitize_log_message(str(e))}")
-        return False
+    return False
 
 
 def _invalidate_stats_cache():
