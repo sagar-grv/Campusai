@@ -21,18 +21,20 @@ export function localStorageProvider() {
 
   window.addEventListener('beforeunload', persist);
 
-  return new Proxy(cache, {
-    get(target, prop, receiver) {
-      if (prop === 'set') {
-        return (key, value) => {
-          const result = target.set(key, value);
-          persist();
-          return result;
-        };
-      }
-      return Reflect.get(target, prop, receiver);
+  return {
+    get: (key) => cache.get(key),
+    set: (key, value) => {
+      const result = cache.set(key, value);
+      persist();
+      return result;
     },
-  });
+    delete: (key) => {
+      const result = cache.delete(key);
+      persist();
+      return result;
+    },
+    keys: () => cache.keys(),
+  };
 }
 
 export function useCompanies(params) {
