@@ -17,15 +17,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
-import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
-from pypdf import PdfReader
-from docx import Document as DocxDocument
 
 from gemini_client import GeminiClient, EMBED_DIM
 from security import (
@@ -36,7 +33,6 @@ from security import (
     STRICT_SYSTEM_GUARDRAILS,
     PER_ENDPOINT_LIMITS,
 )
-from ingest.parser import parse_placement_pdf
 from data.emergent_seed import load_emergent_seed, SEED_VERSION
 from data.branches import normalize_branches, matches_allowed, canonical_for_tags
 from rag import (
@@ -90,6 +86,7 @@ def chunk_text(text: str, size: int = 600, overlap: int = 80) -> List[str]:
 
 
 def cosine(a: List[float], b: List[float]) -> float:
+    import numpy as np
     va = np.asarray(a, dtype=np.float32)
     vb = np.asarray(b, dtype=np.float32)
     return float(np.dot(va, vb))  # both unit-normalised upstream
@@ -190,12 +187,14 @@ def parse_resume(filename: str, content: bytes) -> str:
     fn = filename.lower()
     if fn.endswith(".pdf"):
         try:
+            from pypdf import PdfReader
             reader = PdfReader(io.BytesIO(content))
             return "\n".join((p.extract_text() or "") for p in reader.pages)
         except Exception as e:
             raise HTTPException(400, f"Could not read PDF: {e}")
     if fn.endswith(".docx"):
         try:
+            from docx import Document as DocxDocument
             doc = DocxDocument(io.BytesIO(content))
             return "\n".join(p.text for p in doc.paragraphs)
         except Exception as e:
@@ -790,6 +789,7 @@ async def ingest_placement_pdf(
                 all_records.extend(matched)
                 continue
         try:
+            from ingest.parser import parse_placement_pdf
             result = parse_placement_pdf(io.BytesIO(content), source_file_name=filename, batch_override=batch)
         except ValueError as e:
             raise HTTPException(400, str(e))
