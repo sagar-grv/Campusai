@@ -1186,7 +1186,7 @@ async def build_chat_context(question: str, top_k: int):
     context_parts = []
     sources = []
     seen = set()
-    for c in ranked:
+    for c in ranked[:24]:
         cname = str(c.get("company") or "")
         key = (cname, c.get("batch"))
         if key in seen:
@@ -1194,7 +1194,7 @@ async def build_chat_context(question: str, top_k: int):
         seen.add(key)
         context_parts.append(
             f"[Doc {len(context_parts)+1} | source={c.get('source_file') or 'placement_db'}]\n"
-            f"Company: {cname}. Role: {c.get('role')}. CTC: {c.get('ctc')}. "
+            f"Company: {cname}. Role: {c.get('role')}. CTC: {c.get('ctc')}. Batch: {c.get('batch') or 'N/A'}. "
             f"Branches: {c.get('branches')}. Eligibility: {c.get('eligibility') or c.get('cgpa')}. Notes: {c.get('notes')}."
         )
         sources.append({"source": c.get("source_file") or "placement_db", "score": 0.0, "company": cname})

@@ -79,8 +79,7 @@ class GeminiClient:
                 self.chat_model,
                 "gemini-2.5-flash",
                 "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-2.5-pro",
+                "gemini-3.1-pro-preview",
             ]
             models_to_try = []
             for m in fallback_models:
@@ -157,8 +156,7 @@ class GeminiClient:
                 self.chat_model,
                 "gemini-2.5-flash",
                 "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-2.5-pro",
+                "gemini-3.1-pro-preview",
             ]
             models_to_try = []
             for m in fallback_models:
