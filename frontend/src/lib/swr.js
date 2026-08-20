@@ -3,6 +3,38 @@ import { api } from './api';
 
 const fetcher = (url) => api.get(url).then(r => r.data);
 
+const CACHE_KEY = 'campus-swr:v1';
+
+export function localStorageProvider() {
+  let cache;
+  try {
+    cache = new Map(JSON.parse(localStorage.getItem(CACHE_KEY) || '[]'));
+  } catch {
+    cache = new Map();
+  }
+
+  const persist = () => {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(Array.from(cache.entries())));
+    } catch {}
+  };
+
+  window.addEventListener('beforeunload', persist);
+
+  return new Proxy(cache, {
+    get(target, prop, receiver) {
+      if (prop === 'set') {
+        return (key, value) => {
+          const result = target.set(key, value);
+          persist();
+          return result;
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
 export function useCompanies(params) {
   const key = `/companies?${new URLSearchParams(params).toString()}`;
   return useSWR(key, fetcher, { revalidateOnFocus: false, dedupingInterval: 2000 });

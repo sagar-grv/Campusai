@@ -1,7 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { SWRConfig } from "swr";
 import "./index.css";
 import App from "./App";
+import { localStorageProvider } from "./lib/swr";
 
 const THEME_KEY = "campus-theme";
 
@@ -45,4 +47,8 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(
+  <SWRConfig value={{ provider: localStorageProvider }}>
+    <App />
+  </SWRConfig>
+);

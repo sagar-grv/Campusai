@@ -232,7 +232,9 @@ def parse_resume(filename: str, content: bytes) -> str:
 
 # ---------- initialization ----------
 async def ensure_initialized():
-    global mongo, db, gemini, DB_MODE, _redis_available
+    global mongo, db, gemini, DB_MODE, _redis_available, _boot_done
+    if _boot_done:
+        return
     if gemini is None:
         try:
             gemini = GeminiClient()
@@ -240,7 +242,7 @@ async def ensure_initialized():
             print(f"[gemini] init error: {e}")
     if db is None or mongo is None:
         try:
-            real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=10000)
+            real_mongo = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=2000)
             await real_mongo.admin.command("ping")
             mongo = real_mongo
             DB_MODE = "real"
@@ -276,6 +278,7 @@ async def ensure_initialized():
             print("[db] Indexes ensured on companies collection.")
         except Exception as e:
             print(f"[db] index creation skipped: {sanitize_log_message(str(e))}")
+    _boot_done = True
 
 
 def _build_records_documents(all_records: list) -> list:
@@ -314,6 +317,7 @@ def _build_records_documents(all_records: list) -> list:
 
 # ---------- In-memory cache helpers ----------
 CACHE_TTL = 300  # 5 minutes
+_boot_done = False
 _cache_store = {}  # key -> (value, expiry_timestamp)
 
 
@@ -621,14 +625,18 @@ async def health():
             seed = await db.meta.find_one({"_id": "placement_seed"})
         except Exception:
             pass
-    return {
-        "ok": ok,
-        "chat_model": os.environ.get("CHAT_MODEL", "gemini-2.5-flash"),
-        "embed_model": os.environ.get("EMBED_MODEL", "gemini-embedding-001"),
-        "gemini_ready": gemini is not None and (gemini.ready or bool(os.environ.get("NVIDIA_API_KEY"))),
-        "companies_seeded": bool(seed),
-        "error": error_detail,
-    }
+    return Response(
+        content=json.dumps({
+            "ok": ok,
+            "chat_model": os.environ.get("CHAT_MODEL", "gemini-2.5-flash"),
+            "embed_model": os.environ.get("EMBED_MODEL", "gemini-embedding-001"),
+            "gemini_ready": gemini is not None and (gemini.ready or bool(os.environ.get("NVIDIA_API_KEY"))),
+            "companies_seeded": bool(seed),
+            "error": error_detail,
+        }),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
+    )
 
 
 # ---------- admin ----------
@@ -976,7 +984,11 @@ async def list_companies(
 
     client_ip = request.client.host if request and request.client else "127.0.0.1"
     asyncio.create_task(record_usage("companies_view", client_ip, _visitor_id(request, client_ip)))
-    return {"companies": docs, "total": total, "page": page, "page_size": page_size}
+    return Response(
+        content=json.dumps({"companies": docs, "total": total, "page": page, "page_size": page_size}),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
+    )
 
 
 @app.get("/api/companies/stats")
@@ -989,7 +1001,7 @@ async def companies_stats():
         return Response(
             content=json.dumps(cached),
             media_type="application/json",
-            headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+            headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
         )
     
     total = await db.companies.count_documents({})
@@ -1026,7 +1038,7 @@ async def companies_stats():
     return Response(
         content=json.dumps(data),
         media_type="application/json",
-        headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
     )
 
 
@@ -1040,7 +1052,7 @@ async def dashboard_stats(request: Request = None):
         return Response(
             content=json.dumps(cached),
             media_type="application/json",
-            headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+            headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
         )
     
     total = await db.companies.count_documents({})
@@ -1097,7 +1109,7 @@ async def dashboard_stats(request: Request = None):
     return Response(
         content=json.dumps(data),
         media_type="application/json",
-        headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=120"}
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
     )
 
 
@@ -1114,7 +1126,11 @@ async def get_company(company_id: str):
         doc = await db.companies.find_one({"company": company_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Company not found.")
-    return doc
+    return Response(
+        content=json.dumps(doc),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"}
+    )
 
 
 NO_ANSWER_TEXT = (
